@@ -42,8 +42,9 @@ use seat_agent_core::{Agent, AgentConfig};
 
 let config = AgentConfig {
     modality: Modality::Text,
-    max_tool_rounds: 4,
-    // ...
+    max_rounds: 10,
+    max_duration: Duration::from_secs(30),
+    max_output_tokens: 500,
 };
 let mut agent = Agent::new(config).await?;
 agent.register_tool(Box::new(KnowledgeSearchTool));
@@ -204,6 +205,7 @@ intent_tags: ["退款", "订单查询"]
 
 ### 7.1 消息队列 + 消费模型
 
+
 全双工长连接下，用户消息**持续到达队列**，Agent Loop 每轮开头**一次性消费所有待处理消息**：
 
 ```rust
@@ -212,7 +214,8 @@ pub struct Session {
     context: Context,                         // 对话上下文
     tool_registry: ToolRegistry,              // 全部工具
     agent_config: AgentConfig,                // 配置
-    cancel_token: CancellationToken,          // 取消令牌
+    modality: Modality,                       // 当前模式
+    is_streaming: bool,                       // 是否正在输出回复
 }
 
 impl Session {
@@ -220,7 +223,6 @@ impl Session {
     pub fn on_message(&mut self, msg: UserMessage) {
         self.message_queue.push_back(msg);
     }
-```
 
     /// Agent Loop：每轮消费所有待处理消息
     pub async fn run_loop(&mut self) -> Result<()> {
@@ -228,14 +230,14 @@ impl Session {
 
         loop {
             // 1. 消费队列中所有待处理消息
-            let queued_messages = self.drain_queue();  // 取出所有消息
+            let queued_messages = self.drain_queue();
             if !queued_messages.is_empty() {
                 self.context.history.extend(queued_messages);
             }
 
             // 2. 预检索（并行）
             let last_user_msg = self.context.history.back().unwrap();
-            let (retrieval_results, long_term_results) = self.pre_retrieve(last_user_msg).await;
+            let (retrieval_results, _) = self.pre_retrieve(last_user_msg).await;
             self.context.retrieval = retrieval_results;
 
             // 3. 前置规则检查
@@ -245,34 +247,26 @@ impl Session {
                 return Ok(());
             }
 
-            // 4. 构建 Context（system + retrieval + history_summary + history）
+            // 4. 构建 Context
             let prompt = self.context.build_prompt();
 
-            // 5. 调用 LLM（全部工具，不做意图分类）
+            // 5. 调用 LLM，全部工具不做意图分类
             let response = self.llm.chat(&prompt, &self.tool_registry.all_tools()).await?;
 
             match response {
                 LlmResponse::ToolCall { tool, args } => {
-                    // 执行工具
                     let result = self.execute_tool(tool, args).await?;
-
-                    // 流式输出中间回复
                     self.send_intermediate_reply(tool).await;
-
-                    // 注入结果到 context
                     self.context.add_tool_result(result);
 
-                    // ★ 检查时间限制
+                    // 检查时间限制
                     if start_time.elapsed() > self.agent_config.max_duration {
                         self.send_final_reply("抱歉，处理时间较长，正在为您转接人工客服...").await;
                         self.transfer_to_human().await;
                         return Ok(());
                     }
-
-                    // 继续下一轮
                 }
                 LlmResponse::FinalReply { content } => {
-                    // 发送最终回复
                     self.send_final_reply(&content).await;
                     return Ok(());
                 }
@@ -280,7 +274,6 @@ impl Session {
         }
     }
 
-    /// 取出所有待处理消息
     fn drain_queue(&mut self) -> Vec<UserMessage> {
         self.message_queue.drain(..).collect()
     }
@@ -310,16 +303,13 @@ LLM 看到完整上下文（M1 + tool_result + M2 + M3）→ 回复
 
 ### 7.3 整体流程
 
-```
-用户消息到达 → 加入队列
-  ↓
 ┌─────────────────────────────────────────┐
 │  Agent Loop（直到问题解决或超时）         │
 │  每轮：                                  │
 │  ├── 1. 消费队列中所有消息 → history     │
 │  ├── 2. 预检索（并行）                   │
 │  │     ├── 知识库检索                    │
-│  │     └── 长期记忆检索                  │
+│  │     └── 长期记忆检索（按需）           │
 │  ├── 3. 前置规则检查（空 → 转人工）      │
 │  ├── 4. 构建 Context                    │
 │  ├── 5. 调用 LLM（全部工具）            │
@@ -331,7 +321,6 @@ LLM 看到完整上下文（M1 + tool_result + M2 + M3）→ 回复
 └─────────────────────────────────────────┘
   ↓
   流式输出最终回复
-```
 
 ### 7.4 工具注册
 
@@ -473,7 +462,7 @@ enum Modality { TEXT = 0; VOICE = 1; }
 
 ### 10.1 连接即会话
 
-独立服务模式下，每个 gRPC 双向流连接 = 一个会话。同一客户同一时间只允许一个连接，新消息到达时取消旧 Agent Loop。
+独立服务模式下，每个 gRPC 双向流连接 = 一个会话。同一客户同一时间只允许一个连接，新消息到达时直接入队，不取消当前 Agent Loop。
 
 ### 10.2 会话持久化
 
