@@ -1,0 +1,40 @@
+# Worktrees
+.worktrees/
+
+# Rust build artifacts
+/target
+
+# IDE
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.*
+!.env.example
+!docker/.env.prod.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Protobuf generated (if any)
+**/generated/
+
+# Coverage
+*.profraw
+*.profdata
+coverage/
+
+# Node
+node_modules/
+dist/
+bun.lock
+
+# AI agent context
+.cursorrules
+.dev-flow
