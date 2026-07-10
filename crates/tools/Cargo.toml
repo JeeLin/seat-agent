@@ -1,0 +1,15 @@
+[package]
+name = "seat-agent-tools"
+description = "Tool registry and JSON config loading for seat-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+seat-agent-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tracing.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "seat-agent-memory"
+description = "Short-term and long-term memory for seat-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+seat-agent-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+chrono.workspace = true
