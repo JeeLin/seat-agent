@@ -1,52 +1,33 @@
-# seat-agent — 坐席 Agent Runtime
+# seat-agent
 
-> 面向客服接待场景的 Agent Runtime，支持文本和语音两种对话模态。
+> AI Agent Runtime for Customer Service
 
-## 定位
+seat-agent 是面向客服接待场景的 Agent Runtime，支持文本和语音两种对话模态。
 
-坐席 Agent 是一个 **agent runtime**，不是业务系统。它解决的问题是：
+## 核心特性
 
-> 给定一段客户消息，如何准确、快速地生成回复？
+- **准确性优先** — RAG 必须，不幻觉，检索不到就转人工
+- **速度优先** — 全链路流式，延迟有上限
+- **可嵌入可独立** — 既是 Rust SDK（OCC 集成），也可作为独立 gRPC 服务运行
 
-类似 OMP/OpenClaw 的 agent 架构，但专为客服场景设计：
-- **准确性优先**：RAG 知识检索是必须的，不幻觉
-- **速度优先**：全链路流式，延迟有上限
-- **开发者友好**：Rust API + 配置文件，PyO3 桥接 Python AI 生态
+## 快速开始
 
-## 核心架构
+### 作为库（推荐）
 
+```rust
+use seat_agent_core::{Agent, AgentConfig};
+
+let mut agent = Agent::new(AgentConfig::default()).await?;
+agent.register_tool(Box::new(KnowledgeSearchTool));
+
+let response = agent.chat("我想退货").await?;
 ```
-客户消息 → 预检索（并行：知识库 + 意图分类）
-           ↓
-         Agent Loop（最多 N 轮）:
-           ├── 输入：原始消息 + 预检索结果 + 工具列表
-           ├── LLM 决策：直接回复 / 再查一次 / 转人工
-           └── 流式输出
+
+### 作为独立服务
+
+```bash
+seat-agent-server --config agent.yaml
 ```
-
-## 设计原则
-
-### 1. 准确性：只回答有依据的内容
-
-- 预检索阶段必须执行，知识库内容是回复的信息基础
-- 检索不到相关信息 → 转人工，不编造
-- Agent Loop 中的每次工具调用结果都注入上下文
-
-### 2. 速度：延迟可预测
-
-- 预检索并行执行（目标 <200ms）
-- LLM 首 token（目标 <500ms）
-- 工具调用轮次有硬上限（文本 2 轮，语音 1 轮）
-- 全链路流式输出
-
-### 3. 两种模态，一个核心
-
-| | 文本模式 | 语音模式 |
-|---|---|---|
-| 工具调用轮次 | 最多 2 轮 | 最多 1 轮 |
-| 模型选择 | 灵活 | 低延迟优先 |
-| Agent Loop | 完整 | 受限 |
-| 输出 | 流式文本 | 流式文本 → TTS |
 
 ## 技术栈
 
@@ -54,43 +35,90 @@
 |------|------|
 | 核心 Runtime | Rust |
 | Trait 实现 | reqwest（LLM/Embedding HTTP API）、PyO3（可选，复用 Python 生态） |
-| 配置 | YAML/TOML + Rust API |
-| 通信 | gRPC Bidi Streaming（对外接口） |
-| 会话存储 | Redis（可选） |"{"输入
+| 通信 | gRPC Bidi Streaming（独立服务模式） |
+| 会话存储 | Redis（独立服务模式） |
 
-## 项目结构
+## 架构
+
+### 混合管线 + 受限 Agent Loop
+
+```
+客户消息 → 预检索（并行：知识库 + 意图分类）
+           ↓
+         前置规则检查（检索结果为空/无相关度 → 转人工）
+           ↓
+         工具分组激活（intent_tags → 激活相关工具组）
+           ↓
+         Agent Loop（最多 N 轮）:
+           ├── 第 1 轮：LLM 决策
+           │   ├── 有 tool_call → 执行工具 → 流式输出中间回复 → 注入结果，进入第 2 轮
+           │   └── 无 tool_call → 最终回复，结束
+           └── 超过轮次上限 → 强制结束，返回当前回复
+```
+
+### Context 分层模型
+
+```
+Context
+├── system: Vec<Message>              // 系统指令，不可截断
+├── retrieval: Vec<SearchResult>      // 当前轮预检索结果，不可截断
+├── history_summary: String           // 历史会话摘要，不可截断
+├── history: VecDeque<Message>        // 当前会话对话，唯一可截断
+└── long_term: Box<dyn KnowledgeStore> // 长期存储后端
+```
+
+### 两种模态
+
+| | 文本模式 | 语音模式 |
+|---|---|---|
+| 工具调用轮次 | 最多 4 轮 | 最多 2 轮 |
+| 模型选择 | 灵活 | 低延迟优先 |
+| Agent Loop | 完整 | 受限 |
+
+## 仓库结构
 
 ```
 seat-agent/
-├── Cargo.toml
-├── AGENTS.md
 ├── crates/
-│   ├── core/          # Agent runtime 核心：循环、上下文、决策引擎
-│   ├── tools/         # 工具注册与调用：知识库、业务 API、转人工
-│   ├── memory/        # 记忆系统：短期对话 + 长期向量检索
-│   └── bridge/        # PyO3 桥接：Python AI 生态
+│   ├── core/      # [lib] Agent Loop + Context + Trait 定义
+│   ├── tools/     # [lib] 工具注册 + 分组 + 动态激活
+│   ├── memory/    # [lib] 短期/长期记忆 + 摘要生成
+│   └── server/    # [bin] 独立 gRPC 服务
 ├── docs/
-│   └── ARCHITECTURE.md
 └── examples/
-    └── basic_chat/    # 基础对话示例
 ```
 
-## 使用方式
+## 硬性约束
 
-```rust
-use seat_agent_core::{Agent, AgentConfig};
+1. Core 层零外部依赖
+2. 全链路流式输出
+3. 工具调用轮次硬上限
+4. 不幻觉，检索不到必须转人工
+5. Context 截断只作用于 history 层
+6. 意图分类零延迟（Rust 规则）
+7. 单会话单节点
 
-let config = AgentConfig::from_file("agent.yaml")?;
-let agent = Agent::new(config).await?;
+## 与 OCC 集成
 
-let response = agent.chat("我想退货").await?;
+seat-agent 为 [OCC](https://github.com/JeeLin/OCC) 构建，通过 git 依赖集成：
+
+```toml
+# OCC/Cargo.toml
+[workspace.dependencies]
+seat-agent-core = { git = "ssh://git@ssh.github.com:443/JeeLin/seat-agent.git", path = "crates/core" }
+seat-agent-tools = { git = "ssh://git@ssh.github.com:443/JeeLin/seat-agent.git", path = "crates/tools" }
 ```
 
-## 开发命令
+本地开发时通过 `[patch]` 覆盖为本地路径。
+
+## 开发
 
 ```bash
 cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets
-cargo fmt --check
 ```
+
+## License
+
+MIT
