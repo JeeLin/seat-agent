@@ -1,0 +1,12 @@
+[package]
+name = "basic_chat"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+seat-agent-core.workspace = true
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
