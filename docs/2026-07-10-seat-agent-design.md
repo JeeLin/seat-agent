@@ -767,3 +767,132 @@ seat-agent-server --config agent.yaml
 | **server crate** | `agent.yaml`（完整配置） | 启动时读取 |
 | **LLM 连接** | 配置文件 `llm` 部分 | server crate 实现 |
 | **工具注册** | 配置文件 `tools` 部分 | server crate 按配置注册 |
+
+### 15.7 存储实现切换
+
+#### MemoryStore 切换
+
+```yaml
+memory:
+  type: "redis"                       # 或 "memory"
+  endpoint: "redis://localhost:6379"  # Redis 时必填
+  password: "${REDIS_PASSWORD}"       # 可选
+  database: 0                         # 可选
+  ttl: 3600                           # 默认过期时间（秒）
+```
+
+```rust
+// server/src/memory.rs
+
+/// 内存实现（测试/开发用）
+pub struct MemoryMemory {
+    store: Arc<RwLock<HashMap<String, (String, Instant)>>>,
+}
+
+#[async_trait]
+impl MemoryStore for MemoryMemory {
+    async fn save(&self, key: &str, value: &str, ttl: Option<Duration>) -> Result<()> {
+        let mut store = self.store.write().await;
+        let expiry = ttl.map(|d| Instant::now() + d).unwrap_or(Instant::now() + Duration::from_secs(86400));
+        store.insert(key.to_string(), (value.to_string(), expiry));
+        Ok(())
+    }
+
+    async fn load(&self, key: &str) -> Result<Option<String>> {
+        let store = self.store.read().await;
+        match store.get(key) {
+            Some((value, expiry)) if *expiry > Instant::now() => Ok(Some(value.clone())),
+            _ => Ok(None),
+        }
+    }
+
+    async fn delete(&self, key: &str) -> Result<()> {
+        let mut store = self.store.write().await;
+        store.remove(key);
+        Ok(())
+    }
+}
+
+/// Redis 实现（生产环境）
+pub struct RedisMemory {
+    client: redis::Client,
+    ttl: Duration,
+}
+
+#[async_trait]
+impl MemoryStore for RedisMemory {
+    async fn save(&self, key: &str, value: &str, ttl: Option<Duration>) -> Result<()> {
+        let mut conn = self.client.get_async_connection().await?;
+        let ttl = ttl.unwrap_or(self.ttl);
+        redis::cmd("SETEX")
+            .arg(key)
+            .arg(ttl.as_secs())
+            .arg(value)
+            .query_async(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn load(&self, key: &str) -> Result<Option<String>> {
+        let mut conn = self.client.get_async_connection().await?;
+        let value: Option<String> = redis::cmd("GET")
+            .arg(key)
+            .query_async(&mut conn)
+            .await?;
+        Ok(value)
+    }
+
+    async fn delete(&self, key: &str) -> Result<()> {
+        let mut conn = self.client.get_async_connection().await?;
+        redis::cmd("DEL")
+            .arg(key)
+            .query_async(&mut conn)
+            .await?;
+        Ok(())
+    }
+}
+```
+
+#### KnowledgeStore 切换
+
+```yaml
+knowledge:
+  type: "qdrant"                      # 或 "memory"
+  endpoint: "http://localhost:6333"
+  collection: "knowledge_base"
+```
+
+```rust
+// server/src/knowledge.rs
+
+pub struct QdrantKnowledge { ... }   // 生产环境
+pub struct MemoryKnowledge { ... }   // 测试/开发
+```
+
+#### 使用场景
+
+| 场景 | Memory 配置 | Knowledge 配置 | 说明 |
+|---|---|---|---|
+| **本地开发** | `type: "memory"` | `type: "memory"` | 零依赖，重启后清空 |
+| **单元测试** | `type: "memory"` | `type: "memory"` | 快速，无外部依赖 |
+| **单机部署** | `type: "redis"` | `type: "qdrant"` | 本机服务 |
+| **多节点部署** | `type: "redis"` | `type: "qdrant"` | 共享集群 |
+| **K8s 部署** | `type: "redis"` | `type: "qdrant"` | Operator |
+
+#### 启动逻辑
+
+```rust
+// server/src/main.rs
+
+let memory: Box<dyn MemoryStore> = match config.memory.r#type.as_str() {
+    "redis" => Box::new(RedisMemory::new(&config.memory)?),
+    "memory" => Box::new(MemoryMemory::new()),
+    _ => panic!("Unknown memory type: {}", config.memory.r#type),
+};
+
+let knowledge: Box<dyn KnowledgeStore> = match config.knowledge.r#type.as_str() {
+    "qdrant" => Box::new(QdrantKnowledge::new(&config.knowledge)?),
+    "memory" => Box::new(MemoryKnowledge::new()),
+    _ => panic!("Unknown knowledge type: {}", config.knowledge.r#type),
+};
+```
