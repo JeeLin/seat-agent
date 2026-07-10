@@ -896,3 +896,677 @@ let knowledge: Box<dyn KnowledgeStore> = match config.knowledge.r#type.as_str() 
     _ => panic!("Unknown knowledge type: {}", config.knowledge.r#type),
 };
 ```
+
+---
+
+## 16. 工具结构化定义
+
+### 16.1 设计原则
+
+- 所有工具配置必须**结构化**，方便页面表单生成
+- 使用 JSON Schema 描述参数，前端自动生成表单
+- 工具元信息（名称、描述、分类）统一管理
+- 支持导入/导出工具配置（JSON 格式）
+
+### 16.2 工具配置 JSON 格式
+
+```json
+{
+  "tools": [
+    {
+      "name": "knowledge_search",
+      "display_name": "知识库检索",
+      "description": "搜索知识库获取答案",
+      "category": "info_query",
+      "enabled": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索关键词或问题描述",
+            "min_length": 1,
+            "max_length": 500
+          }
+        },
+        "required": ["query"]
+      },
+      "intermediate_reply": {
+        "text": "正在查阅知识库...",
+        "audio_cue": "sounds/keyboard_typing.mp3"
+      },
+      "error_reply": "抱歉，知识库查询暂时不可用"
+    },
+    {
+      "name": "order_query",
+      "display_name": "订单查询",
+      "description": "根据订单号或手机号查询订单状态",
+      "category": "info_query",
+      "enabled": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "订单号",
+            "pattern": "^[0-9]{10,20}$"
+          },
+          "phone": {
+            "type": "string",
+            "description": "客户手机号",
+            "pattern": "^1[3-9][0-9]{9}$"
+          }
+        },
+        "anyOf": [
+          { "required": ["order_id"] },
+          { "required": ["phone"] }
+        ]
+      },
+      "intermediate_reply": {
+        "text": "稍等，我来帮您查一下订单信息...",
+        "audio_cue": "sounds/keyboard_typing.mp3"
+      },
+      "error_reply": "抱歉，订单查询暂时不可用"
+    },
+    {
+      "name": "refund_apply",
+      "display_name": "申请退款",
+      "description": "为客户申请退款",
+      "category": "action",
+      "enabled": true,
+      "sensitive": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "要退款的订单号"
+          },
+          "reason": {
+            "type": "string",
+            "description": "退款原因",
+            "min_length": 2,
+            "max_length": 500
+          }
+        },
+        "required": ["order_id", "reason"]
+      },
+      "intermediate_reply": {
+        "text": "正在为您提交退款申请...",
+        "audio_cue": "sounds/processing.mp3"
+      },
+      "error_reply": "抱歉，退款申请暂时不可用"
+    },
+    {
+      "name": "transfer_to_human",
+      "display_name": "转人工客服",
+      "description": "转接人工客服",
+      "category": "transfer",
+      "enabled": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "转人工原因（内部记录）"
+          },
+          "reply": {
+            "type": "string",
+            "description": "回复给客户的话术（委婉专业）"
+          }
+        },
+        "required": ["reason", "reply"]
+      },
+      "intermediate_reply": {
+        "text": "正在为您转接，请稍候...",
+        "audio_cue": "sounds/ringing.mp3"
+      },
+      "error_reply": "转接暂时不可用"
+    }
+  ]
+}
+```
+
+### 16.3 工具分类
+
+| 分类 | 英文标识 | 说明 |
+|---|---|---|
+| 信息查询 | `info_query` | 只读查询，无副作用 |
+| 行为操作 | `action` | 会产生实际影响 |
+| 转人工 | `transfer` | 转接人工客服 |
+| 辅助 | `utility` | 格式化、翻译等辅助功能 |
+
+### 16.4 工具字段说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `name` | string | ✅ | 工具唯一标识（英文，下划线分隔） |
+| `display_name` | string | ✅ | 页面显示名称（中文） |
+| `description` | string | ✅ | 工具描述（LLM 使用） |
+| `category` | enum | ✅ | 分类（info_query/action/transfer/utility） |
+| `enabled` | bool | ✅ | 是否启用 |
+| `sensitive` | bool | ❌ | 是否涉及敏感操作（默认 false） |
+| `parameters` | JSON Schema | ✅ | 参数定义（遵循 JSON Schema 标准） |
+| `intermediate_reply` | object | ❌ | 中间回复（零延迟） |
+| `error_reply` | string | ❌ | 执行失败时的回复话术 |
+
+### 16.5 JSON Schema 参数规则
+
+| 类型 | 支持字段 | 说明 |
+|---|---|---|
+| `string` | `min_length`, `max_length`, `pattern` | 支持正则校验 |
+| `number` | `minimum`, `maximum` | 数值范围 |
+| `enum` | `enum` | 枚举值列表 |
+| `array` | `items`, `min_items`, `max_items` | 数组类型 |
+
+#### 参数校验示例
+
+```json
+{
+  "phone": {
+    "type": "string",
+    "description": "手机号",
+    "pattern": "^1[3-9][0-9]{9}$",
+    "min_length": 11,
+    "max_length": 11
+  },
+  "amount": {
+    "type": "number",
+    "description": "金额",
+    "minimum": 0.01,
+    "maximum": 99999.99
+  },
+  "status": {
+    "type": "string",
+    "description": "状态",
+    "enum": ["pending", "processing", "completed", "failed"]
+  }
+}
+```
+
+### 16.6 页面配置流程
+
+```mermaid
+flowchart TD
+    A[选择工具类型] --> B[填写基本信息]
+    B --> C{是否需要参数?}
+    C -->|是| D[配置参数 Schema]
+    C -->|否| E[配置回复话术]
+    D --> E
+    E --> F{是否敏感操作?}
+    F -->|是| G[标记敏感 + 确认提示]
+    F -->|否| H[预览工具配置]
+    G --> H
+    H --> I[保存工具配置 JSON]
+```
+
+### 16.7 工具配置导入/导出
+
+```rust
+// tools/src/registry.rs
+
+pub struct ToolConfig {
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub category: String,
+    pub enabled: bool,
+    pub sensitive: bool,
+    pub parameters: serde_json::Value,  // JSON Schema
+    pub intermediate_reply: Option<IntermediateReply>,
+    pub error_reply: Option<String>,
+}
+
+impl ToolRegistry {
+    /// 从 JSON 导入工具配置
+    pub fn from_json(json: &str) -> Result<Self> {
+        let config: ToolConfigFile = serde_json::from_str(json)?;
+        let mut registry = Self::new();
+
+        for tool_config in config.tools {
+            registry.register_tool_config(tool_config);
+        }
+
+        Ok(registry)
+    }
+
+    /// 导出工具配置为 JSON
+    pub fn to_json(&self) -> Result<String> {
+        let config = ToolConfigFile {
+            tools: self.tools.values().cloned().collect(),
+        };
+        Ok(serde_json::to_string_pretty(&config)?)
+    }
+}
+```
+
+### 16.8 页面表单自动生成
+
+前端根据 JSON Schema 自动生成配置表单：
+
+```typescript
+// 页面表单生成逻辑
+
+interface ToolParameter {
+  type: 'string' | 'number' | 'enum' | 'array';
+  description: string;
+  min_length?: number;
+  max_length?: number;
+  pattern?: string;
+  minimum?: number;
+  maximum?: number;
+  enum?: string[];
+  items?: ToolParameter;
+}
+
+function generateFormFromSchema(schema: JSONSchema) {
+  const fields = schema.properties;
+  const required = schema.required || [];
+
+  return Object.entries(fields).map(([name, param]) => ({
+    name,
+    label: param.description,
+    type: getFormType(param),
+    required: required.includes(name),
+    validation: getValidation(param),
+  }));
+}
+
+function getFormType(param: ToolParameter) {
+  switch (param.type) {
+    case 'string':
+      if (param.enum) return 'select';
+      if (param.pattern?.includes('^1')) return 'phone';
+      return 'text';
+    case 'number':
+      return 'number';
+    case 'array':
+      return 'tags';
+    default:
+      return 'text';
+  }
+}
+```
+
+---
+
+## 17. Feature 控制与可选依赖
+
+### 17.1 设计原则
+
+- 核心功能（Agent Loop、Context）**无外部依赖**
+- 所有外部服务通过 **Feature 开关**控制
+- 默认只包含内存实现（测试/开发）
+- 生产依赖按需启用，减小二进制体积
+- 编译时检查缺失 Feature，给出友好提示
+
+### 17.2 Feature 列表
+
+| Feature | 依赖 | 说明 | 默认 |
+|---|---|---|---|
+| `in_memory` | 无 | 内存向量库 + 内存存储 | ✅ |
+| `qdrant` | `qdrant-client` | Qdrant 向量库 | ❌ |
+| `milvus` | `milvus-rs` | Milvus 向量库 | ❌ |
+| `chroma` | `chroma-client` | ChromaDB 向量库 | ❌ |
+| `pgvector` | `sqlx` | PostgreSQL pgvector | ❌ |
+| `redis` | `redis` | Redis 存储 | ❌ |
+| `openai` | `reqwest` | OpenAI LLM | ❌ |
+| `anthropic` | `reqwest` | Anthropic LLM | ❌ |
+| `ollama` | `reqwest` | Ollama 本地 LLM | ❌ |
+| `python` | `pyo3` | Python 绑定 | ❌ |
+
+### 17.3 Cargo.toml 配置
+
+```toml
+# crates/server/Cargo.toml
+
+[features]
+default = ["in_memory"]
+
+# 向量数据库
+qdrant = ["dep:qdrant-client"]
+milvus = ["dep:milvus-rs"]
+chroma = ["dep:chroma-client"]
+pgvector = ["dep:sqlx", "dep:sqlx-postgres"]
+
+# LLM 提供商
+openai = ["dep:reqwest"]
+anthropic = ["dep:reqwest"]
+ollama = ["dep:reqwest"]
+
+# 存储
+redis = ["dep:redis"]
+
+# Python 绑定
+python = ["dep:pyo3"]
+
+[dependencies]
+# 向量数据库（可选）
+qdrant-client = { version = "1", optional = true }
+milvus-rs = { version = "0.3", optional = true }
+chroma-client = { version = "0.4", optional = true }
+sqlx = { version = "0.7", features = ["runtime-tokio"], optional = true }
+
+# HTTP 客户端（LLM 调用）
+reqwest = { version = "0.11", features = ["json", "stream"], optional = true }
+
+# 存储
+redis = { version = "0.23", features = ["tokio-comp"], optional = true }
+
+# Python（可选）
+pyo3 = { version = "0.20", optional = true }
+
+# 核心依赖（无 feature 依赖）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+```
+
+### 17.4 构建命令
+
+```bash
+# 默认（仅内存，测试用）
+cargo build --workspace
+
+# 生产环境（Qdrant + Redis + OpenAI）
+cargo build --workspace --features "qdrant,redis,openai"
+
+# Milvus 版本
+cargo build --workspace --features "milvus,redis,openai"
+
+# pgvector 版本（已有 PostgreSQL）
+cargo build --workspace --features "pgvector,redis,anthropic"
+
+# 轻量版（ChromaDB + 内存）
+cargo build --workspace --features "chroma"
+
+# 完整版（所有功能）
+cargo build --workspace --features "qdrant,milvus,chroma,pgvector,redis,openai,anthropic,ollama"
+```
+
+### 17.5 向量数据库抽象
+
+```rust
+// crates/core/src/traits.rs
+
+#[async_trait]
+pub trait VectorStore: Send + Sync {
+    async fn upsert(&self, id: &str, embedding: &[f32], metadata: HashMap<String, Value>) -> Result<()>;
+    async fn search(&self, embedding: &[f32], limit: usize, filter: Option<Filter>) -> Result<Vec<SearchResult>>;
+    async fn delete(&self, id: &str) -> Result<()>;
+    async fn count(&self) -> Result<usize>;
+}
+```
+
+### 17.6 各实现条件编译
+
+```rust
+// crates/server/src/vector_store.rs
+
+#[cfg(feature = "qdrant")]
+pub mod qdrant {
+    use super::*;
+
+    pub struct QdrantVectorStore { /* ... */ }
+
+    #[async_trait]
+    impl VectorStore for QdrantVectorStore { /* ... */ }
+}
+
+#[cfg(feature = "milvus")]
+pub mod milvus {
+    use super::*;
+
+    pub struct MilvusVectorStore { /* ... */ }
+
+    #[async_trait]
+    impl VectorStore for MilvusVectorStore { /* ... */ }
+}
+
+#[cfg(feature = "pgvector")]
+pub mod pgvector {
+    use super::*;
+
+    pub struct PgVectorStore { /* ... */ }
+
+    #[async_trait]
+    impl VectorStore for PgVectorStore { /* ... */ }
+}
+
+pub mod in_memory {
+    use super::*;
+
+    pub struct InMemoryVectorStore { /* ... */ }
+
+    #[async_trait]
+    impl VectorStore for InMemoryVectorStore { /* ... */ }
+}
+```
+
+### 17.7 工厂函数
+
+```rust
+// crates/server/src/vector_store.rs
+
+pub fn create_vector_store(config: &VectorStoreConfig) -> Result<Box<dyn VectorStore>> {
+    match config.r#type.as_str() {
+        #[cfg(feature = "qdrant")]
+        "qdrant" => Ok(Box::new(qdrant::QdrantVectorStore::new(config)?)),
+
+        #[cfg(feature = "milvus")]
+        "milvus" => Ok(Box::new(milvus::MilvusVectorStore::new(config)?)),
+
+        #[cfg(feature = "pgvector")]
+        "pgvector" => Ok(Box::new(pgvector::PgVectorStore::new(config)?)),
+
+        "in_memory" | _ => Ok(Box::new(in_memory::InMemoryVectorStore::new())),
+    }
+}
+```
+
+### 17.8 编译时检查
+
+```rust
+// crates/server/src/main.rs
+
+fn check_features() {
+    #[cfg(not(any(feature = "qdrant", feature = "milvus", feature = "pgvector")))]
+    tracing::warn!("未配置向量数据库，仅使用内存模式");
+
+    #[cfg(not(feature = "redis"))]
+    tracing::warn!("未配置 Redis，会话存储使用内存模式");
+
+    #[cfg(not(any(feature = "openai", feature = "anthropic", feature = "ollama")))]
+    tracing::warn!("未配置 LLM 提供商，请在配置文件中指定");
+}
+```
+
+### 17.9 配置文件对应
+
+```yaml
+# agent.yaml
+
+vector_store:
+  type: "qdrant"                      # 或 milvus/pgvector/in_memory
+  endpoint: "http://localhost:6333"
+  collection: "knowledge_base"
+  dimension: 1536                     # 向量维度
+
+memory:
+  type: "redis"                       # 或 memory
+  endpoint: "redis://localhost:6379"
+
+llm:
+  type: "openai"                      # 或 anthropic/ollama
+  endpoint: "https://api.openai.com/v1"
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-4o"
+```
+---
+
+## 18. 转人工规则与话术设计
+
+
+### 18.1 转人工触发条件
+
+| 条件 | 触发时机 | 由谁判断 |
+|---|---|---|
+| **客户明确要求** | 任何时候 | LLM |
+| **工具连续失败** | Agent Loop 中 | Agent 核心 |
+| **知识库无结果 + LLM 不确定** | 预检索 + LLM 决策 | Agent 核心 |
+| **敏感操作** | 工具调用前 | 工具定义 |
+| **超时** | Agent Loop 超时 | Agent 核心 |
+| **对话循环** | 轮次过多 | Agent 核心 |
+
+### 18.2 不应转人工的场景
+
+| 场景 | 为什么 | 正确做法 |
+|---|---|---|
+| 客户说"算了" | 可能只是放弃当前问题 | LLM 理解后回复 |
+| 工具返回"无结果" | 可能是查询条件不对 | LLM 追问或换工具 |
+| 客户追问 | 正常多轮对话 | 继续 Agent Loop |
+| 客户说"不明白" | 需要解释 | LLM 换个说法 |
+| 客户情绪波动 | LLM 不擅长判断情绪 | 不以此为转人工依据 |
+
+### 18.3 Agent 核心自动转人工规则
+
+```rust
+// core/src/agent.rs
+
+impl Agent {
+    async fn check_auto_transfer(&self, context: &Context) -> Option<String> {
+        // 工具连续失败 3 次
+        if context.tool_failures >= 3 {
+            return Some("工具调用连续失败3次".into());
+        }
+
+        // 检索结果为空 + LLM 不确定
+        if context.retrieval.is_empty() && context.llm_uncertainty > 0.8 {
+            return Some("知识库无结果，LLM 无法确定答案".into());
+        }
+
+        // 对话轮次过多
+        if context.turn_count > 15 {
+            return Some("对话轮次过多，可能陷入循环".into());
+        }
+
+        None
+    }
+}
+```
+
+### 18.4 敏感操作列表
+
+```rust
+const SENSITIVE_ACTIONS: &[&str] = &[
+    "修改订单金额",
+    "删除账号",
+    "退款到其他账户",
+    "修改用户信息",
+    "删除订单",
+    "取消已发货订单",
+];
+```
+
+### 18.5 转人工话术设计
+
+#### 原则
+
+1. 所有对外话术必须**委婉、专业、有温度**
+2. 不暴露内部逻辑（不说明真实原因）
+3. 使用"您"、"为您"、"专属客服"等词汇
+
+#### 话术对比
+
+| 场景 | 直白（❌） | 专业（✅） |
+|---|---|---|
+| 客户明确要求 | "好的，转人工" | "好的，为您转接专属客服" |
+| 敏感操作 | "这个我处理不了" | "这个操作需要专员为您处理" |
+| 工具失败 | "系统出错了" | "正在为您查询，请稍候" |
+| 超时 | "处理时间太长了" | "您的问题正在加急处理中" |
+
+#### 中间回复话术
+
+| 工具 | 中间回复 |
+|---|---|
+| knowledge_search | "正在查阅知识库..." |
+| order_query | "稍等，我来帮您查一下订单信息..." |
+| refund_apply | "正在为您提交退款申请..." |
+| transfer_to_human | "正在为您转接，请稍候..." |
+
+### 18.6 转人工工具设计
+
+```rust
+pub struct TransferToHumanTool;
+
+#[async_trait]
+impl Tool for TransferToHumanTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "transfer_to_human".into(),
+            description: "转接人工客服。仅在以下情况使用：
+1. 客户明确要求转人工；
+2. 涉及敏感操作（修改订单金额、删除账号、退款到其他账户等）；
+3. 问题超出能力范围（需要专业技术人员介入）。
+不要因为客户抱怨、追问或说"算了"就转人工。".into(),
+            parameters: vec![
+                ToolParameter {
+                    name: "reason".into(),
+                    description: "转人工原因（内部记录用，不展示给客户）".into(),
+                    required: true,
+                    r#type: "string".into(),
+                },
+                ToolParameter {
+                    name: "reply".into(),
+                    description: "回复给客户的话术（必须委婉、专业）".into(),
+                    required: true,
+                    r#type: "string".into(),
+                },
+            ],
+            intermediate_reply: Some(IntermediateReply {
+                text: "正在为您转接，请稍候...".into(),
+                audio_cue: Some("sounds/ringing.mp3".into()),
+            }),
+        }
+    }
+
+    async fn execute(&self, args: serde_json::Value) -> Result<String> {
+        let reason = args["reason"].as_str().unwrap();
+        let reply = args["reply"].as_str().unwrap();
+
+        // 内部记录原因
+        tracing::info!("转人工原因: {}", reason);
+
+        // 调用转人工 API
+        // ...
+
+        // 返回给客户的话术
+        Ok(reply.to_string())
+    }
+}
+```
+
+### 18.7 System Prompt 话术规则
+
+```text
+你是客服助手。回复必须简洁、专业、有温度。
+
+## 话术规则
+
+### 转人工话术（必须委婉）
+- ✅ "好的，为您转接专属客服"
+- ✅ "这个操作需要专员为您处理，正在转接"
+- ✅ "您的问题正在加急处理中，请稍候"
+- ❌ "我处理不了，转人工"
+- ❌ "系统出错了"
+- ❌ "我不知道"
+
+### 通用话术原则
+1. 使用"您"而不是"你"
+2. 使用"我们"而不是"我"
+3. 避免负面词汇（不行、不能、不知道）
+4. 用"正在为您..."代替"我需要..."
+5. 用"建议您..."代替"你应该..."
+```
