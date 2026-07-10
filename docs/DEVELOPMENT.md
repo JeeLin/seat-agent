@@ -3,8 +3,7 @@
 ## 里程碑规划
 
 | 版本 | 标题 | 核心功能 | 状态 |
-|---|---|---|---|
-| v0.1.0 | 基础架构 | core crate（trait + Config + Context + Agent Loop）+ tools crate（ToolRegistry + JSON 配置加载） | 下一个 |
+| v0.1.0 | 基础架构 | core crate（trait + Config + Context + Agent Loop）+ tools crate（ToolRegistry + JSON 配置加载） | ✅ 已完成 |
 | v0.2.0 | LLM 集成 | OpenAI LLM 实现 + mock LLM + 基础示例 | 规划中 |
 | v0.3.0 | 独立服务 | server crate（gRPC + 配置加载 + Redis） | 规划中 |
 | v0.4.0 | 知识库集成 | VectorStore trait + Qdrant/内存实现 + 检索工具 | 规划中 |
@@ -14,10 +13,8 @@
 
 ## 当前状态
 
-- 设计文档已完成（18个章节）
-- 代码尚未开始
-- 下一个里程碑：v0.1.0 基础架构
-
+- ✅ v0.1.0 基础架构已完成
+- 下一个里程碑：v0.2.0 LLM 集成
 ## 技术决策记录
 
 | 决策 | 选择 | 理由 |
