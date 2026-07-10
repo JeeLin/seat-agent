@@ -11,9 +11,10 @@ seat-agent 是面向客服接待场景的 Agent Runtime，支持文本和语音�
 | 层级 | 技术 |
 |------|------|
 | 核心 Runtime | Rust |
-| AI 生态桥接 | PyO3（embedding、向量库、LLM SDK） |
+| Trait 实现 | reqwest（LLM/Embedding HTTP API）、PyO3（可选，复用 Python 生态） |
 | 配置 | YAML/TOML + Rust API |
-| 通信 | gRPC（对外接口） |
+| 通信 | gRPC Bidi Streaming（对外接口） |
+| 会话存储 | Redis（可选） |"{"输入
 
 ## 架构原则
 

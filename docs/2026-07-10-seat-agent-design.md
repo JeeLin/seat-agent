@@ -15,16 +15,22 @@ seat-agent 是面向客服接待场景的 **Agent Runtime**，支持文本和语
 
 ---
 
-## 2. 部署形态
+## 2. 部署形态与架构定位
 
-SDK + 独立服务双模式。
+seat-agent 是**引擎**，不是业务系统。它解决的问题是：
+
+> 给定一段客户消息，如何准确、快速地生成回复？
+
+**多租户由上层平台负责**，seat-agent 只关心"怎么配"，不关心"谁在用"。
+
+### 2.1 使用模式
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  seat-agent (library / SDK)                              │
-│  ┌────────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐ │
-│  │    core    │  │  tools   │  │  memory  │  │ bridge │ │
-│  │ (纯库)     │  │ (工具)   │  │ (记忆)   │  │ (PyO3) │ │
+│  ┌────────────┐  ┌──────────┐  ┌──────────┐  ┌───────┐ │
+│  │    core    │  │  tools   │  │  memory  │  │ impl  │ │
+│  │ (纯库)     │  │ (工具)   │  │ (记忆)   │  │(实现) │ │
 │  └────────────┘  └──────────┘  └──────────┘  └────────┘ │
 │                          ↑ 全部通过 trait 解耦              │
 │                                                          │
@@ -39,6 +45,71 @@ SDK + 独立服务双模式。
 - **独立服务**：`server` crate 封装 gRPC 服务，集成方只需 `seat_agent_server::serve(config).await`
 
 > 两种模式下，单个会话都在单个节点内执行，不跨节点。
+
+### 2.2 多租户模型
+
+seat-agent 不内置租户概念。**租户隔离由上层平台负责**，seat-agent 通过 `AgentConfig` 支持不同配置：
+
+```rust
+// 从外部注入配置（集成方负责读取自己的配置）
+let config = AgentConfig {
+    modality: Modality::Text,
+    max_tool_rounds: 4,
+    tools: ToolGroupConfig::from_yaml(&enterprise_a_tools)?,
+    llm: LlmConfig { model: "gpt-4o".into() },
+    // ...
+};
+let agent = Agent::new(config).await?;
+```
+
+seat-agent 不关心"谁在用"，只关心"怎么配"。**租户隔离、权限控制、计费**是上层平台的职责。
+
+### 2.3 部署架构演进
+
+**第一版（当前）**：本地配置，单机部署
+```
+seat-agent ← YAML 文件
+           ← Redis（会话）
+           ← 外部向量库
+```
+
+**第二版（企业部署）**：配置中心 + 多节点
+```
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  seat-agent  │  │  seat-agent  │  │  seat-agent  │
+│   Node 1     │  │   Node 2     │  │   Node 3     │
+└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+       │                 │                 │
+       └────────┬────────┘────────┬────────┘
+                │                 │
+          ┌─────┴─────┐    ┌─────┴─────┐
+          │   Redis    │    │  Qdrant   │
+          │  Cluster   │    │ Cluster   │
+          └───────────┘    └───────────┘
+                │
+         ┌──────┴──────┐
+         │ Config Center│
+         │ (Consul/etcd)│
+         └─────────────┘
+```
+
+**第三版（SaaS 平台）**：多租户 + 动态配置
+```
+┌─────────────────────────────────────────┐
+│              API Gateway                 │
+│         (tenant_id 路由)                 │
+└──────────────┬──────────────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │   Config Center     │
+    │ (tenant_id → config)│
+    └──────────┬──────────┘
+               │
+    ┌──────────┴──────────┐
+    │  seat-agent 集群     │
+    │  (无状态，按配置启动) │
+    └─────────────────────┘
+```
 
 ---
 
@@ -227,13 +298,15 @@ pub struct ToolCallRequest {
 
 | Trait | 职责 | 可能的实现 |
 |---|---|---|
-| `LlmClient` | LLM 推理调用 | PyO3 (litellm) / reqwest (OpenAI API) / 本地模型 |
-| `EmbeddingClient` | 文本向量化 | PyO3 (sentence-transformers) / 原生 Rust |
+| `LlmClient` | LLM 推理调用 | reqwest (OpenAI API) / PyO3 (litellm) |
+| `EmbeddingClient` | 文本向量化 | reqwest (外部 API) / PyO3 (sentence-transformers) |
 | `KnowledgeStore` | 知识库存储与检索 | 内存 HNSW / Qdrant / Milvus |
 | `TtsClient` | 文本转语音 | Azure TTS / ElevenLabs / 本地 TTS |
 | `Tool` | 工具定义与执行 | 各具体工具实现 |
+| `ConfigProvider` | 配置加载与热更新 | 本地 YAML / Consul / 数据库 |
+| `SessionStore` | 会话状态持久化 | Redis / Redis Cluster |
 
-`core` crate **零外部依赖**（除 async runtime），不 import infra/bridge。
+`core` crate **零外部依赖**（除 async runtime），不 import impl。PyO3 是可选实现方式，不强制依赖。
 
 ---
 
@@ -266,16 +339,22 @@ seat-agent/
 │   │   └── src/
 │   │       ├── store.rs        # SessionStore trait（Redis 等实现）
 │   │       └── snapshot.rs     # 会话快照序列化
-│   ├── bridge/                 # PyO3 桥接（具体 trait 实现）
-│   │   └── src/
-│   │       ├── embedding.rs    # EmbeddingClient trait 实现
-│   │       ├── llm.rs          # LlmClient trait 实现（litellm/本地）
-│   │       ├── store.rs        # KnowledgeStore trait 实现（Qdrant等）
-│   │       └── tts.rs          # TtsClient trait 实现（Azure/本地）
-│   └── server/                 # 独立服务（可选）
-│       └── src/
-│           ├── grpc.rs         # gRPC 服务实现（Bidi Streaming）
-│           └── main.rs         # 入口
+├── impl/                   # trait 具体实现（可插拔）
+│   └── src/
+│       ├── embedding.rs    # EmbeddingClient 实现
+│       ├── llm.rs          # LlmClient 实现（reqwest/PyO3）
+│       ├── knowledge.rs    # KnowledgeStore 实现（HTTP/PyO3）
+│       ├── tts.rs          # TtsClient 实现
+│       ├── config.rs       # ConfigProvider 实现（YAML/Consul/DB）
+│       └── session_store.rs # SessionStore 实现（Redis）
+├── session/                # 会话持久化
+│   └── src/
+│       ├── store.rs        # SessionStore trait（Redis 等实现）
+│       └── snapshot.rs     # 会话快照序列化
+└── server/                 # 独立服务（可选）
+    └── src/
+        ├── grpc.rs         # gRPC 服务实现（Bidi Streaming）
+        └── main.rs         # 入口
 ├── docs/
 │   └── 2026-07-10-seat-agent-design.md  # 本文件
 └── examples/
