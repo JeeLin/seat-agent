@@ -141,14 +141,25 @@ impl Agent {
                 .map_err(|_| AgentError::Internal("Channel closed".into()))?;
 
             // 检查是否有工具调用
-            if tool_calls.is_empty() {
+            let tool_calls_struct: Option<Vec<crate::traits::ToolCall>> = if tool_calls.is_empty() {
                 // 没有工具调用，回复完成
-                context.add_assistant_message(content);
+                context.add_assistant_message(content, None);
                 break;
-            }
+            } else {
+                Some(
+                    tool_calls
+                        .iter()
+                        .map(|(id, name, args)| crate::traits::ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            arguments: args.clone(),
+                        })
+                        .collect(),
+                )
+            };
 
             // 有工具调用，执行工具
-            context.add_assistant_message(content);
+            context.add_assistant_message(content, tool_calls_struct);
 
             for (tool_call_id, tool_name, arguments) in &tool_calls {
                 // 查找工具
@@ -215,8 +226,8 @@ impl Agent {
                 context.add_tool_result(tool_call_id.clone(), result);
             }
 
-            // 清空工作区，准备下一轮
-            context.clear_working();
+            // 将工作区内容移动到历史，供下一轮 LLM 查看
+            context.flush_working_to_history();
             round += 1;
         }
 

@@ -1,0 +1,36 @@
+[tools]
+rust = "stable"
+
+# ─── Tasks ────────────────────────────────────────────────────────────────────
+
+[tasks.install]
+description = "Install Rust toolchain"
+run = "rustup show active-toolchain"
+
+[tasks.build]
+description = "Build all crates"
+run = "cargo build --workspace"
+
+[tasks.check]
+description = "Run all checks (check + clippy + fmt)"
+run = "cargo check --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all -- --check"
+
+[tasks.test]
+description = "Run all tests"
+run = "cargo test --workspace"
+
+[tasks.fmt]
+description = "Format code"
+run = "cargo fmt"
+
+[tasks.clippy]
+description = "Run clippy lints"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = "cargo clean"
+
+[tasks.dev]
+description = "Run seat-agent-server"
+run = "cargo run -p seat-agent-server"

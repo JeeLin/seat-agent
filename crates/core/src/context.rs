@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
 
 use crate::config::{AgentConfig, Modality};
-use crate::traits::{KnowledgeResult, MessageRole};
+use crate::traits::{KnowledgeResult, MessageRole, ToolCall};
 
 /// Agent 消息
 #[derive(Debug, Clone)]
 pub struct Message {
     pub role: MessageRole,
     pub content: String,
+    pub tool_calls: Option<Vec<ToolCall>>,
     pub tool_call_id: Option<String>,
 }
 
@@ -88,6 +89,7 @@ impl Context {
             system: vec![Message {
                 role: MessageRole::System,
                 content: system_prompt,
+                tool_calls: None,
                 tool_call_id: None,
             }],
             retrieval: Vec::new(),
@@ -103,15 +105,21 @@ impl Context {
         self.history.push_back(Message {
             role: MessageRole::User,
             content,
+            tool_calls: None,
             tool_call_id: None,
         });
     }
 
     /// 添加助手消息到历史
-    pub fn add_assistant_message(&mut self, content: String) {
+    pub fn add_assistant_message(
+        &mut self,
+        content: String,
+        tool_calls: Option<Vec<crate::traits::ToolCall>>,
+    ) {
         self.history.push_back(Message {
             role: MessageRole::Assistant,
             content,
+            tool_calls,
             tool_call_id: None,
         });
     }
@@ -121,6 +129,7 @@ impl Context {
         self.working.push(Message {
             role: MessageRole::Tool,
             content,
+            tool_calls: None,
             tool_call_id: Some(tool_call_id),
         });
     }
@@ -174,13 +183,12 @@ impl Context {
                 tool_call_id: None,
             });
         }
-
         // 4. History messages
         for msg in &self.history {
             messages.push(crate::traits::LlmMessage {
                 role: msg.role.clone(),
                 content: msg.content.clone(),
-                tool_calls: None,
+                tool_calls: msg.tool_calls.clone(),
                 tool_call_id: msg.tool_call_id.clone(),
             });
         }
