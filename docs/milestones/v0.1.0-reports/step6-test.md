@@ -9,25 +9,13 @@
 | 格式检查 (`cargo fmt --check`) | ✅ 通过 | 代码格式正确 |
 | 测试 (`cargo test --workspace`) | ✅ 通过 | 7 个测试套件，全部通过 |
 
-## 详细结果
+## 代码审查修复
 
-### 测试结果
-```
-cargo test: ok (7 suites, 0.00s)
-```
-
-### Clippy 结果
-```
-(no warnings or errors)
-```
-
-### Fmt 结果
-```
-OK
-```
+- 修复 P0 bug：Agent Loop 中工具结果被丢弃（clear_working → flush_working_to_history）
+- 修复 P0 bug：助手消息的 tool_calls 字段现在正确保存到历史中
 
 ## 结论
 
 ✅ 通过
 
-所有质量门禁检查通过。
+所有质量门禁检查通过，P0 bug 已修复。
