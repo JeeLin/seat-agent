@@ -38,6 +38,8 @@ SDK + 独立服务双模式。
 - **SDK 模式**：集成方自行创建 `Agent` 实例，调用 `agent.chat(message)` 获取流式响应，自己管理通信层（HTTP/gRPC/WebSocket 等）
 - **独立服务**：`server` crate 封装 gRPC 服务，集成方只需 `seat_agent_server::serve(config).await`
 
+> 两种模式下，单个会话都在单个节点内执行，不跨节点。
+
 ---
 
 ## 3. Context 分层模型
@@ -154,25 +156,33 @@ intent_tags: ["退款", "订单查询"]
   流式输出最终回复
 ```
 
-### 5.2 中间回复模板
+### 5.2 中间回复提示词
 
-工具注册时声明中间回复，Agent 执行工具后自动流式输出，零 LLM 延迟：
+工具注册时声明中间提示词，按当前模态选择文本或音频，Agent 执行工具后自动输出，零 LLM 延迟：
 
 ```rust
+/// 中间提示词，区分文本和语音两种模态
+pub struct IntermediateReply {
+    /// 文本模式：流式输出的提示文本
+    pub text: Option<String>,          // "稍等，我来查一下工单信息"
+    /// 语音模式：播放的提示音效路径
+    pub audio_cue: Option<String>,     // "sounds/keyboard_typing.mp3"
+}
+
 pub struct ToolInfo {
     pub name: String,
     pub description: String,
-    pub intermediate_reply: Option<String>,  // "正在查询您的订单..."
+    pub intermediate_reply: IntermediateReply,
     pub parameters: JsonSchema,
 }
 ```
 
 示例：
-| 工具 | intermediate_reply |
-|---|---|
-| knowledge_search | "正在查阅知识库..." |
-| order_query | "正在查询您的订单，请稍候..." |
-| transfer_to_human | "正在为您转接人工客服..." |
+| 工具 | text（文本模式） | audio_cue（语音模式） |
+|---|---|---|
+| knowledge_search | "正在查阅知识库..." | sounds/keyboard_typing.mp3 |
+| order_query | "稍等，我来查一下工单信息" | sounds/keyboard_typing.mp3 |
+| transfer_to_human | "正在为您转接人工客服..." | sounds/ringing.mp3 |
 
 ### 5.3 工具调用轮次上限
 
@@ -242,7 +252,7 @@ seat-agent/
 │   │       └── traits.rs       # 核心 trait 定义
 │   ├── tools/                  # 工具注册与执行
 │   │   └── src/
-│   │       ├── registry.rs     # 工具注册表（ToolInfo + intermediate_reply）
+│   │       ├── registry.rs     # 工具注册表（ToolInfo + IntermediateReply）
 │   │       ├── knowledge.rs    # 知识库检索工具
 │   │       ├── business.rs     # 业务系统查询工具
 │   │       └── transfer.rs     # 转人工工具
@@ -251,6 +261,10 @@ seat-agent/
 │   │       ├── short_term.rs   # 短期记忆（当前会话 history，滑动窗口）
 │   │       ├── long_term.rs    # 长期记忆（会话摘要存储）
 │   │       └── summary.rs      # 会话摘要生成/修正
+│   ├── session/                # 会话持久化
+│   │   └── src/
+│   │       ├── store.rs        # SessionStore trait（Redis 等实现）
+│   │       └── snapshot.rs     # 会话快照序列化
 │   ├── bridge/                 # PyO3 桥接（具体 trait 实现）
 │   │   └── src/
 │   │       ├── embedding.rs    # EmbeddingClient trait 实现
@@ -258,26 +272,27 @@ seat-agent/
 │   │       └── store.rs        # KnowledgeStore trait 实现（Qdrant等）
 │   └── server/                 # 独立服务（可选）
 │       └── src/
-│           ├── grpc.rs         # gRPC 服务实现
+│           ├── grpc.rs         # gRPC 服务实现（Bidi Streaming）
 │           └── main.rs         # 入口
 ├── docs/
 │   └── 2026-07-10-seat-agent-design.md  # 本文件
 └── examples/
     └── basic_chat/             # SDK 模式示例
-```
+
 
 ---
 
 ## 8. 硬性约束（汇总）
 
 1. **Rust 依赖声明在根 Cargo.toml**，子 crate 用 `workspace = true`
-2. **Domain 层零外部依赖**：core crate 不依赖 infra/bridge/server
+2. **Domain 层零外部依赖**：core crate 不依赖 infra/bridge/server/session
 3. **全链路流式**：Agent 响应天然是 token 流，不是完整字符串
 4. **工具调用轮次硬上限**：由 AgentConfig.max_tool_rounds 控制，不可绕过
 5. **不幻觉**：检索不到知识时，必须转人工或明确告知，不编造
 6. **Context 截断安全**：永远只截断 history 层，system/retrieval/summary 不可截断
 7. **意图分类零延迟**：由 Rust 规则实现，不走 LLM
-
+8. **单会话单节点**：一次会话的 Agent Loop 在单个节点内存中运行，不跨节点
+9. **会话信息持久化到 Redis**：每轮 Agent Loop 结束后异步写入，不阻塞流式输出
 ---
 
 ## 9. 延迟预算
@@ -292,10 +307,129 @@ seat-agent/
 
 ---
 
-## 10. 待讨论项
+## 10. gRPC 通信协议
 
-- [ ] gRPC 协议设计（service definition，request/response schema）
+采用 **Bidirectional Streaming**，一个连接 = 一次会话，天然支持流式输出和打断：
+
+```protobuf
+service SeatAgent {
+  // 双向流：客户端持续发送消息，服务端持续流式回复
+  rpc Chat (stream ChatMessage) returns (stream ChatChunk);
+}
+
+message ChatMessage {
+  string session_id = 1;       // 会话标识，首次为空，服务端返回
+  string content = 2;          // 用户消息
+  Modality modality = 3;       // text / voice
+}
+
+message ChatChunk {
+  oneof payload {
+    string token = 1;           // 流式文本 token
+    AudioCue audio = 2;         // 语音模式中间提示音
+    ToolEvent tool_event = 3;   // 工具调用事件（可选，用于调试）
+    ChatEnd end = 4;            // 对话结束信号
+  }
+}
+
+message AudioCue {
+  string cue_id = 1;           // 音效标识，客户端本地查找播放
+  bytes audio_data = 2;        // 或直接下发音频二进制
+}
+
+enum Modality {
+  TEXT = 0;
+  VOICE = 1;
+}
+```
+
+**为什么不用 Server Streaming**：Server Streaming 是一问一答，客户端发一次、服务端连续回多次。无法处理"打断"——客户端发新消息时无法取消服务端正在进行的流。Bidi Streaming 下客户端发新消息自然取消旧 Loop。
+
+---
+
+## 11. 会话管理
+
+### 11.1 连接即会话
+
+每个 gRPC 双向流连接 = 一个会话。同一客户同一时间只允许一个连接，新连接到达时关闭旧连接的 Agent Loop。
+
+```
+客户接入 → 建立 Bidi Stream
+  → 首条消息携带 session_id（可空）
+  → 服务端分配 session_id 并返回
+  → Agent Loop 在该节点上运行
+  → 客户发新消息 → 取消旧 Loop，处理新消息
+  → 连接关闭 → 会话结束，生成摘要
+```
+
+### 11.2 会话持久化（Redis）
+
+Redis 存储**会话信息**，不做执行状态。单次会话的 Agent Loop 在单个节点内存中运行，Redis 是会话信息的备份。
+
+```
+Redis 存什么:
+  - customer_id → session_id 映射
+  - 当前对话的 context（history、summary）
+  - 会话 metadata（创建时间、节点信息）
+
+Redis 不存什么:
+  - LLM streaming 状态
+  - Agent Loop 运行时变量
+  - 工具调用中间结果
+```
+
+**写入时机**：每完成一轮 Agent Loop，异步将 context 快照写入 Redis（不阻塞流式输出）。
+
+### 11.3 断线恢复
+
+```
+连接断开
+  → 节点保留会话状态 30s
+  → 客户重连，携带 session_id
+  → 服务端从 Redis 加载 session
+  → 以用户的下一条消息为起点，重新进入 Agent Loop
+  → 30s 内未重连 → 会话过期，摘要异步生成
+```
+
+### 11.4 打断处理
+
+同一连接内，客户发新消息即为打断：
+
+```
+Agent Loop 正在处理 M1（流式输出中）
+  ↓
+客户发送 M2
+  ↓
+  ├── 取消 M1 的 LLM 调用和工具执行（CancellationToken）
+  ├── M1 的已输出内容不写入 history
+  └── 以 M2 为最新消息，重新进入预检索 → Agent Loop
+```
+
+实现依赖 tokio `CancellationToken`，Agent Loop 和工具执行均绑定到同一个 token，取消时立即释放资源。
+
+### 11.5 SessionStore trait
+
+```rust
+#[async_trait]
+pub trait SessionStore: Send + Sync {
+    /// 保存会话快照
+    async fn save(&self, snapshot: SessionSnapshot) -> Result<()>;
+    /// 加载会话快照
+    async fn load(&self, session_id: &str) -> Result<Option<SessionSnapshot>>;
+    /// 删除会话
+    async fn delete(&self, session_id: &str) -> Result<()>;
+    /// 设置过期时间
+    async fn expire(&self, session_id: &str, ttl: Duration) -> Result<()>;
+}
+```
+
+Redis 实现由 `bridge` crate 提供，`session` crate 只依赖 trait。
+
+---
+
+## 12. 待讨论项
+
 - [ ] 配置文件格式（YAML/TOML 的具体 schema）
-- [ ] 并发模型（tokio runtime 配置，per-session 隔离）
 - [ ] 监控与可观测性（tracing、metrics）
 - [ ] 测试策略（单元测试、集成测试、mock LLM）
+- [ ] 语音模式完整链路（ASR → Agent → TTS）
