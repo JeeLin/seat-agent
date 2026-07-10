@@ -1,4 +1,15 @@
+pub mod agent;
 pub mod config;
 pub mod context;
 pub mod error;
 pub mod traits;
+
+pub use agent::Agent;
+pub use config::{AgentConfig, Modality};
+pub use context::{AgentEvent, AgentInput, Context, Message};
+pub use error::{AgentError, Result};
+pub use traits::{
+    EmbeddingClient, KnowledgeResult, KnowledgeStore, LlmClient, LlmMessage, LlmRequest,
+    LlmStreamChunk, MemoryStore, MessageRole, SearchResult, Tool, ToolCall, ToolDefinition,
+    TtsClient, VectorStore,
+};
