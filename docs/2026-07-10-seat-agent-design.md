@@ -230,6 +230,7 @@ pub struct ToolCallRequest {
 | `LlmClient` | LLM 推理调用 | PyO3 (litellm) / reqwest (OpenAI API) / 本地模型 |
 | `EmbeddingClient` | 文本向量化 | PyO3 (sentence-transformers) / 原生 Rust |
 | `KnowledgeStore` | 知识库存储与检索 | 内存 HNSW / Qdrant / Milvus |
+| `TtsClient` | 文本转语音 | Azure TTS / ElevenLabs / 本地 TTS |
 | `Tool` | 工具定义与执行 | 各具体工具实现 |
 
 `core` crate **零外部依赖**（除 async runtime），不 import infra/bridge。
@@ -269,7 +270,8 @@ seat-agent/
 │   │   └── src/
 │   │       ├── embedding.rs    # EmbeddingClient trait 实现
 │   │       ├── llm.rs          # LlmClient trait 实现（litellm/本地）
-│   │       └── store.rs        # KnowledgeStore trait 实现（Qdrant等）
+│   │       ├── store.rs        # KnowledgeStore trait 实现（Qdrant等）
+│   │       └── tts.rs          # TtsClient trait 实现（Azure/本地）
 │   └── server/                 # 独立服务（可选）
 │       └── src/
 │           ├── grpc.rs         # gRPC 服务实现（Bidi Streaming）
@@ -307,7 +309,85 @@ seat-agent/
 
 ---
 
-## 10. gRPC 通信协议
+## 10. 输入输出设计
+
+### 10.1 输入类型
+
+Agent 核心只接收文本，多模态输入由上层或 ASR 预处理：
+
+| 输入类型 | Agent 收到的格式 | 预处理 |
+|---|---|---|
+| 纯文本 | `Content::Text` | 无需处理 |
+| 语音 | `Content::Text` | ASR 服务转文字（Agent 不感知） |
+| 文本 + 图片 | `Content::Text + Content::Image` | 直接透传给 Vision 模型 |
+| 文本 + 文件/PDF | `Content::Text` | 上层系统提取文本后传入 |
+
+多模态 Message 定义：
+
+```rust
+pub enum Content {
+    Text(String),
+    Image { url: String, detail: String },  // Vision 模型
+}
+
+pub struct Message {
+    pub role: Role,
+    pub content: Vec<Content>,
+}
+```
+
+### 10.2 输出模式
+
+Agent 输出类型可配置，根据模态自动选择：
+
+```rust
+pub enum OutputMode {
+    /// 纯文本输出（文本模式）
+    Text,
+    /// 文本 + TTS（语音模式）
+    TextToSpeech {
+        voice_id: Option<String>,  // 可选音色
+    },
+    /// 自适应：根据输入模态自动选择
+    Adaptive,
+}
+```
+
+**Adaptive 模式逻辑**：
+```
+输入 modality = TEXT  → 输出 Text
+输入 modality = VOICE → 输出 TextToSpeech
+```
+
+### 10.3 TTS trait
+
+```rust
+#[async_trait]
+pub trait TtsClient: Send + Sync {
+    /// 文本转语音，返回音频流
+    async fn synthesize(&self, text: &str, voice: Option<&str>) -> AudioStream;
+}
+
+pub struct AudioStream {
+    pub format: AudioFormat,  // wav / mp3 / opus
+    pub sample_rate: u32,
+    pub chunks: Pin<Box<dyn Stream<Item = Bytes>>>,
+}
+```
+
+### 10.4 Agent 输出流程
+
+Agent Loop 核心只产出文本，TTS 在输出层按 `OutputMode` 决定是否调用：
+
+```
+Agent Loop → LlmResponse::Text(text)
+  ├── OutputMode::Text → 直接流式输出 token
+  ├── OutputMode::TextToSpeech → text → TtsClient → AudioStream 流式输出
+  └── OutputMode::Adaptive → 根据当前 session 的 modality 选择
+```
+
+Agent 核心不关心输出类型，`OutputMode` 由配置或会话参数决定。
+## 11. gRPC 通信协议
 
 采用 **Bidirectional Streaming**，一个连接 = 一次会话，天然支持流式输出和打断：
 
@@ -326,7 +406,7 @@ message ChatMessage {
 message ChatChunk {
   oneof payload {
     string token = 1;           // 流式文本 token
-    AudioCue audio = 2;         // 语音模式中间提示音
+    AudioCue audio = 2;         // 语音输出（TTS 音频 / 中间提示音）
     ToolEvent tool_event = 3;   // 工具调用事件（可选，用于调试）
     ChatEnd end = 4;            // 对话结束信号
   }
@@ -347,9 +427,9 @@ enum Modality {
 
 ---
 
-## 11. 会话管理
+## 12. 会话管理
 
-### 11.1 连接即会话
+### 12.1 连接即会话
 
 每个 gRPC 双向流连接 = 一个会话。同一客户同一时间只允许一个连接，新连接到达时关闭旧连接的 Agent Loop。
 
@@ -362,7 +442,7 @@ enum Modality {
   → 连接关闭 → 会话结束，生成摘要
 ```
 
-### 11.2 会话持久化（Redis）
+### 12.2 会话持久化（Redis）
 
 Redis 存储**会话信息**，不做执行状态。单次会话的 Agent Loop 在单个节点内存中运行，Redis 是会话信息的备份。
 
@@ -380,7 +460,7 @@ Redis 不存什么:
 
 **写入时机**：每完成一轮 Agent Loop，异步将 context 快照写入 Redis（不阻塞流式输出）。
 
-### 11.3 断线恢复
+### 12.3 断线恢复
 
 ```
 连接断开
@@ -391,7 +471,7 @@ Redis 不存什么:
   → 30s 内未重连 → 会话过期，摘要异步生成
 ```
 
-### 11.4 打断处理
+### 12.4 打断处理
 
 同一连接内，客户发新消息即为打断：
 
@@ -407,7 +487,7 @@ Agent Loop 正在处理 M1（流式输出中）
 
 实现依赖 tokio `CancellationToken`，Agent Loop 和工具执行均绑定到同一个 token，取消时立即释放资源。
 
-### 11.5 SessionStore trait
+### 12.5 SessionStore trait
 
 ```rust
 #[async_trait]
@@ -427,7 +507,7 @@ Redis 实现由 `bridge` crate 提供，`session` crate 只依赖 trait。
 
 ---
 
-## 12. 待讨论项
+## 13. 待讨论项
 
 - [ ] 配置文件格式（YAML/TOML 的具体 schema）
 - [ ] 监控与可观测性（tracing、metrics）
