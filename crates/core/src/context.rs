@@ -33,14 +33,9 @@ pub enum AgentEvent {
         arguments: String,
     },
     /// 工具调用结束
-    ToolCallEnd {
-        tool_name: String,
-        result: String,
-    },
+    ToolCallEnd { tool_name: String, result: String },
     /// 转人工
-    TransferToHuman {
-        reason: String,
-    },
+    TransferToHuman { reason: String },
     /// 错误
     Error(String),
 }
@@ -82,9 +77,10 @@ pub struct Context {
 impl Context {
     /// 创建新的 Context
     pub fn new(session_id: String, config: AgentConfig) -> Self {
-        let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
-            build_default_system_prompt(&config.modality)
-        });
+        let system_prompt = config
+            .system_prompt
+            .clone()
+            .unwrap_or_else(|| build_default_system_prompt(&config.modality));
 
         Self {
             session_id,
@@ -165,7 +161,8 @@ impl Context {
 
         // 3. Retrieval results (as system message)
         if !self.retrieval.is_empty() {
-            let retrieval_content = self.retrieval
+            let retrieval_content = self
+                .retrieval
                 .iter()
                 .map(|r| format!("【{}】{}", r.id, r.content))
                 .collect::<Vec<_>>()

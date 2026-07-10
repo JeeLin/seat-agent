@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
 use seat_agent_core::{Tool, ToolDefinition};
+use serde::{Deserialize, Serialize};
 
 /// 工具配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,10 +118,7 @@ impl ToolRegistry {
 
     /// 获取所有工具定义（用于 LLM 请求）
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
-            .values()
-            .map(|t| t.definition())
-            .collect()
+        self.tools.values().map(|t| t.definition()).collect()
     }
 
     /// 添加工具配置（不绑定具体实现）

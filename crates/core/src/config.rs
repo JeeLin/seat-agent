@@ -3,18 +3,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 /// 对话模态
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum Modality {
     /// 文本模式
+    #[default]
     Text,
     /// 语音模式
     Voice,
-}
-
-impl Default for Modality {
-    fn default() -> Self {
-        Self::Text
-    }
 }
 
 /// Agent 配置

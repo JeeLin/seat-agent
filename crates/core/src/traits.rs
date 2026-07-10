@@ -54,18 +54,11 @@ pub enum LlmStreamChunk {
     /// 文本内容
     Content(String),
     /// 工具调用开始
-    ToolCallStart {
-        id: String,
-        name: String,
-    },
+    ToolCallStart { id: String, name: String },
     /// 工具调用参数（增量）
-    ToolCallDelta {
-        arguments: String,
-    },
+    ToolCallDelta { arguments: String },
     /// 流结束
-    Done {
-        finish_reason: FinishReason,
-    },
+    Done { finish_reason: FinishReason },
     /// 错误
     Error(String),
 }

@@ -6,9 +6,7 @@ use tokio::sync::mpsc;
 use crate::config::AgentConfig;
 use crate::context::{AgentEvent, AgentInput, Context};
 use crate::error::{AgentError, Result};
-use crate::traits::{
-    KnowledgeStore, LlmClient, LlmRequest, LlmStreamChunk, MemoryStore, Tool,
-};
+use crate::traits::{KnowledgeStore, LlmClient, LlmRequest, LlmStreamChunk, MemoryStore, Tool};
 
 /// Agent 主循环
 pub struct Agent {
@@ -154,7 +152,10 @@ impl Agent {
 
             for (tool_call_id, tool_name, arguments) in &tool_calls {
                 // 查找工具
-                let tool = self.tools.iter().find(|t| t.definition().name == *tool_name);
+                let tool = self
+                    .tools
+                    .iter()
+                    .find(|t| t.definition().name == *tool_name);
 
                 let result = match tool {
                     Some(tool) => {
