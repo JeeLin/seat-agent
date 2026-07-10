@@ -69,14 +69,14 @@ seat-agent/
 ├── crates/
 │   ├── core/                   # [lib] Agent Loop + Context + Trait 定义
 │   │   └── src/
-│   │       ├── agent.rs        #   Agent 主循环
+│   │       ├── agent.rs        #   Agent 主循环（Session + run_loop）
 │   │       ├── context.rs      #   Context 分层模型 + token 预算
 │   │       ├── config.rs       #   AgentConfig
 │   │       ├── error.rs        #   错误类型
-│   │       └── traits.rs       #   核心 trait 定义（LlmClient / Tool / ...）
-│   ├── tools/                  # [lib] 工具注册 + 分组 + 动态激活
+│   │       └── traits.rs       #   核心 trait 定义
+│   ├── tools/                  # [lib] 工具注册 + 执行
 │   │   └── src/
-│   │       ├── registry.rs     #   ToolRegistry（分组 + 激活逻辑）
+│   │       ├── registry.rs     #   ToolRegistry（注册 + 列表）
 │   │       ├── knowledge.rs    #   内置工具：知识库检索
 │   │       ├── business.rs     #   内置工具：业务系统查询
 │   │       └── transfer.rs     #   内置工具：转人工
@@ -202,123 +202,162 @@ intent_tags: ["退款", "订单查询"]
 
 ## 7. Agent Loop 设计
 
-### 7.1 整体流程
+### 7.1 消息队列 + 消费模型
 
-```
-客户消息
-  ↓
-┌─────────────────────────────────────────┐
-│  预检索阶段（并行）                       │
-│  ├── 知识库检索 (KnowledgeStore)          │
-│  ├── 意图分类 (Rust 规则，0ms)            │
-│  └── 长期记忆检索（按需）                 │
-│                                         │
-│  前置规则检查（Rust，毫秒级）:            │
-│  └── 检索结果为空或无相关度 → 转人工       │
-│       （不进 Agent Loop，节省 LLM 调用）  │
-└─────────────────────────────────────────┘
-  ↓
-┌─────────────────────────────────────────┐
-│  构建 Context                            │
-│  system + retrieval + history_summary   │
-│  + intent 标签 + 用户消息               │
-│                                         │
-│  工具分组激活：                           │
-│  intent_tags → 激活相关工具组            │
-│  → 只传激活的工具给 LLM                  │
-└─────────────────────────────────────────┘
-  ↓
-┌─────────────────────────────────────────┐
-│  Agent Loop（最多 N 轮）                 │
-│  ├── 第 1 轮 LLM 调用                    │
-│  │   ├── 有 tool_call? → 执行工具         │
-│  │   │   → 流式输出中间回复               │
-+│  │   │   → 注入结果，进入第 2 轮           │
-│  │   └── 无 tool_call? → 最终回复，结束   │
-│  ├── 第 2 轮 ...                         │
-│  └── 超过轮次上限 → 强制结束，返回当前回复 │
-└─────────────────────────────────────────┘
-  ↓
-  流式输出最终回复（文本 / TTS 音频）
-```
-
-### 7.2 工具分组与动态激活
-
-工具按业务域分组，只激活当前对话需要的组，避免工具过多导致 token 开销和 LLM 选择能力下降：
+全双工长连接下，用户消息**持续到达队列**，Agent Loop 每轮开头**一次性消费所有待处理消息**：
 
 ```rust
-pub struct ToolRegistry {
-    tools: HashMap<String, Box<dyn Tool>>,
-    groups: HashMap<String, ToolGroup>,
+pub struct Session {
+    message_queue: VecDeque<UserMessage>,    // 用户消息队列
+    context: Context,                         // 对话上下文
+    tool_registry: ToolRegistry,              // 全部工具
+    agent_config: AgentConfig,                // 配置
+    cancel_token: CancellationToken,          // 取消令牌
 }
 
-pub struct ToolGroup {
-    pub name: String,                     // 分组名（如 "order"）
-    pub tools: Vec<String>,               // 该组包含的工具名
-    pub trigger: Vec<String>,             // 意图关键词（空 = 始终激活）
-    pub always_active: bool,              // true = 始终激活
-}
+impl Session {
+    /// 全双工接收用户消息，加入队列
+    pub fn on_message(&mut self, msg: UserMessage) {
+        self.message_queue.push_back(msg);
+    }
 ```
 
-分组配置示例：
+    /// Agent Loop：每轮消费所有待处理消息
+    pub async fn run_loop(&mut self) -> Result<()> {
+        let start_time = Instant::now();
 
-```yaml
-groups:
-  knowledge:
-    always_active: true
-    tools:
-      - name: knowledge_search
-        description: "搜索知识库获取答案"
-        intermediate_reply:
-          text: "正在查阅知识库..."
-          audio_cue: "sounds/keyboard_typing.mp3"
+        loop {
+            // 1. 消费队列中所有待处理消息
+            let queued_messages = self.drain_queue();  // 取出所有消息
+            if !queued_messages.is_empty() {
+                self.context.history.extend(queued_messages);
+            }
 
-  order:
-    trigger: ["订单", "退款", "退货", "物流"]
-    tools:
-      - name: order_query
-        description: "查询订单状态"
-        intermediate_reply:
-          text: "稍等，我来查一下工单信息"
-          audio_cue: "sounds/keyboard_typing.mp3"
-      - name: refund_apply
-        description: "申请退款"
+            // 2. 预检索（并行）
+            let last_user_msg = self.context.history.back().unwrap();
+            let (retrieval_results, long_term_results) = self.pre_retrieve(last_user_msg).await;
+            self.context.retrieval = retrieval_results;
 
-  transfer:
-    always_active: true
-    tools:
-      - name: transfer_to_human
-        description: "转接人工客服"
-        intermediate_reply:
-          text: "正在为您转接人工客服..."
-          audio_cue: "sounds/ringing.mp3"
-```
+            // 3. 前置规则检查
+            if self.context.retrieval.is_empty() {
+                self.send_final_reply("抱歉，我无法回答这个问题。正在为您转接人工客服...").await;
+                self.transfer_to_human().await;
+                return Ok(());
+            }
 
-激活逻辑：
+            // 4. 构建 Context（system + retrieval + history_summary + history）
+            let prompt = self.context.build_prompt();
 
-```rust
-impl ToolRegistry {
-    pub fn activate_tools(&self, intent_tags: &[String]) -> Vec<&dyn Tool> {
-        let mut active = Vec::new();
-        for group in self.groups.values() {
-            let should_activate = group.always_active
-                || group.trigger.iter().any(|t| intent_tags.iter().any(|tag| tag.contains(t)));
-            if should_activate {
-                for name in &group.tools {
-                    if let Some(tool) = self.tools.get(name) {
-                        active.push(tool.as_ref());
+            // 5. 调用 LLM（全部工具，不做意图分类）
+            let response = self.llm.chat(&prompt, &self.tool_registry.all_tools()).await?;
+
+            match response {
+                LlmResponse::ToolCall { tool, args } => {
+                    // 执行工具
+                    let result = self.execute_tool(tool, args).await?;
+
+                    // 流式输出中间回复
+                    self.send_intermediate_reply(tool).await;
+
+                    // 注入结果到 context
+                    self.context.add_tool_result(result);
+
+                    // ★ 检查时间限制
+                    if start_time.elapsed() > self.agent_config.max_duration {
+                        self.send_final_reply("抱歉，处理时间较长，正在为您转接人工客服...").await;
+                        self.transfer_to_human().await;
+                        return Ok(());
                     }
+
+                    // 继续下一轮
+                }
+                LlmResponse::FinalReply { content } => {
+                    // 发送最终回复
+                    self.send_final_reply(&content).await;
+                    return Ok(());
                 }
             }
         }
-        active
+    }
+
+    /// 取出所有待处理消息
+    fn drain_queue(&mut self) -> Vec<UserMessage> {
+        self.message_queue.drain(..).collect()
     }
 }
 ```
 
-### 7.3 中间回复提示词
+### 7.2 消息消费时序
 
-工具注册时声明中间提示词，按当前模态选择文本或音频，Agent 执行工具后自动输出，零 LLM 延迟：
+```
+用户发送 M1 → 队列 [M1]
+Agent Loop 启动：消费 [M1] → 预检索 → 调 LLM
+  ↓
+用户发送 M2 → 队列 [M2]
+用户发送 M3 → 队列 [M2, M3]
+  ↓
+第 1 轮 LLM 返回 tool_call → 执行工具 → 中间回复 → 注入结果
+  ↓
+第 2 轮开始：消费 [M2, M3] → 追加到 history → 预检索 → 调 LLM
+  ↓
+LLM 看到完整上下文（M1 + tool_result + M2 + M3）→ 回复
+```
+
+**关键点**：
+- 每轮只消费一次队列，不是每条消息触发一个 Loop
+- 消息到达不打断当前轮，而是在下一轮开始时一起处理
+- 工具执行期间到达的消息会被累积，下一轮一起处理
+
+### 7.3 整体流程
+
+```
+用户消息到达 → 加入队列
+  ↓
+┌─────────────────────────────────────────┐
+│  Agent Loop（直到问题解决或超时）         │
+│  每轮：                                  │
+│  ├── 1. 消费队列中所有消息 → history     │
+│  ├── 2. 预检索（并行）                   │
+│  │     ├── 知识库检索                    │
+│  │     └── 长期记忆检索                  │
+│  ├── 3. 前置规则检查（空 → 转人工）      │
+│  ├── 4. 构建 Context                    │
+│  ├── 5. 调用 LLM（全部工具）            │
+│  ├── 6. LLM 返回                       │
+│  │     ├── tool_call → 执行 → 中间回复  │
+│  │     │   → 注入结果 → 继续下一轮      │
+│  │     └── 最终回复 → 结束              │
+│  └── 7. 检查时间限制 → 超时则转人工     │
+└─────────────────────────────────────────┘
+  ↓
+  流式输出最终回复
+```
+
+### 7.4 工具注册
+
+全部工具直接注册，不做意图分类。LLM 根据对话内容自行选择工具：
+
+```rust
+pub struct ToolRegistry {
+    tools: Vec<Box<dyn Tool>>,     // 全部已注册工具
+}
+
+impl ToolRegistry {
+    pub fn all_tools(&self) -> &[Box<dyn Tool>] {
+        &self.tools
+    }
+}
+```
+
+**为什么不做意图分类**：
+- 客服场景工具数量通常 6-8 个，LLM 完全能处理
+- 意图分类不可能枚举完整，会漏掉工具
+- Rust 规则预测不准反而限制 LLM 能力
+- 如果未来工具过多，通过 OCC 按租户配置裁剪工具列表
+
+### 7.5 中间回复提示词
+
+工具注册时声明中间回复，按当前模态选择文本或音频，Agent 执行工具后自动输出，零 LLM 延迟：
 
 ```rust
 pub struct IntermediateReply {
@@ -327,16 +366,40 @@ pub struct IntermediateReply {
 }
 ```
 
-### 7.4 工具调用轮次上限
+### 7.6 限制策略
 
-| 模态 | 默认上限 | 说明 |
+| 限制类型 | 默认值 | 说明 |
 |---|---|---|
-| 文本 | 4 轮 | 每轮间有中间回复，客户感知为正常等待 |
-| 语音 | 2 轮 | 语音场景更敏感，上限更低 |
+| `max_duration` | 30s | 硬上限，超时强制转人工 |
+| `max_rounds` | 10 | 软上限，防御无限循环 |
+| `max_output_tokens` | 500 | 单次输出长度限制 |
 
-超限时强制结束 Agent Loop，返回当前已有内容。
+**时间是真正的约束，轮次是防御。**
 
----
+### 7.7 打断处理（指语音模式下的 TTS 打断）
+
+**Agent Loop 本身不处理打断。** 打断是 TTS/传输层的问题，不是 Loop 层的问题。
+
+| 模式 | 用户行为 | 处理方式 |
+|---|---|---|
+| **文字** | 用户连续输入消息 | 消息入队，下一轮 Loop 一次性消费。无需打断 |
+| **语音** | TTS 正在播放时用户开口说话 | TTS 层停止播放，新语音经 ASR 转文字后入队 |
+
+语音打断由 **TTS 层**处理（非 Loop 层）：
+
+```
+TTS 正在播放回复（文本已开始输出）
+  → 用户开口说话（ASR 检测到语音活动）
+  → TTS 层：停止播放
+     （为了真实感可随机延迟 100-300ms 再停止）
+  → ASR 识别完成 → 用户消息入队
+  → Loop 下一轮消费该消息
+```
+
+Agent Loop 对所有消息一视同仁，不区分"打断"还是"正常消息"：
+- 已输出的文本内容保留在 history 中（已发送给客户）
+- 正在执行但未输出的工具结果也保留在 history 中
+- TTS 是否被截断不影响 Loop 的行为
 
 ## 8. 输入输出设计
 
@@ -424,19 +487,9 @@ enum Modality { TEXT = 0; VOICE = 1; }
   → 从 Redis 加载 session → 重新进入 Agent Loop
   → 30s 内未重连 → 会话过期，摘要异步生成
 ```
+### 10.4 语音模式下的 TTS 打断
 
-### 10.4 打断处理
-
-同一连接内，客户发新消息即为打断：
-
-```
-Agent Loop 正在处理 M1
-  → 客户发送 M2
-  → 取消 M1 的 LLM 调用和工具执行（CancellationToken）
-  → M1 已输出内容不写入 history
-  → 以 M2 为最新消息，重新进入 Agent Loop
-```
-
+**不是 Loop 层的功能**。TTS 层检测到用户开口说话（ASR 语音活动检测）后停止播放，新消息经 ASR 转文字后入队。Agent Loop 对打断无感知，按队列正常消费即可。
 ---
 
 ## 11. 硬性约束
@@ -444,11 +497,10 @@ Agent Loop 正在处理 M1
 1. **Rust 依赖声明在根 Cargo.toml**，子 crate 用 `workspace = true`
 2. **Domain 层零外部依赖**：core crate 不依赖 server/infra
 3. **全链路流式**：Agent 响应天然是 token 流，不是完整字符串
-4. **工具调用轮次硬上限**：由 AgentConfig.max_tool_rounds 控制，不可绕过
-5. **不幻觉**：检索不到知识时，必须转人工或明确告知，不编造
-6. **Context 截断安全**：永远只截断 history 层，system/retrieval/summary 不可截断
-7. **意图分类零延迟**：由 Rust 规则实现，不走 LLM
-8. **单会话单节点**：一次会话的 Agent Loop 在单个节点内存中运行，不跨节点
+4. **不幻觉**：检索不到知识时，必须转人工或明确告知，不编造
+5. **Context 截断安全**：永远只截断 history 层，system/retrieval/summary 不可截断
+6. **单会话单节点**：一次会话的 Agent Loop 在单个节点内存中运行，不跨节点
+7. **输出长度限制**：客服场景要求简洁，单次回复不超过 max_output_tokens
 
 ---
 
@@ -456,7 +508,7 @@ Agent Loop 正在处理 M1
 
 | 阶段 | 目标延迟 | 实现方式 |
 |---|---|---|
-| 预检索（并行） | <200ms | Rust 规则意图分类 + 知识库向量检索并行 |
+| 预检索（并行） | <200ms | 知识库向量检索 + 长期记忆检索并行 |
 | LLM 首 token | <500ms | 流式 SSE，首次 chunk 到达即开始输出 |
 | 工具执行 | <500ms | 工具自身实现需满足，超时则跳过 |
 | 中间回复 | 0ms | 模板注入，不调 LLM |
