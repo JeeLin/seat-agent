@@ -30,6 +30,8 @@ serde_json = "1"
 # 错误处理
 thiserror = "1"
 anyhow = "1"
+# HTTP 客户端
+reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
 # 异步 trait
 async-trait = "0.1"
