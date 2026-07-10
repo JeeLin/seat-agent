@@ -196,7 +196,6 @@ customer_id: "CUST_12345"
 session_id: "sess_20260308_refund"
 created_at: "2026-03-08T14:30:00Z"
 summary: "客户张三，2026-03-08 咨询订单 #12345 退款问题，已提交退款申请，等待 3-5 个工作日。"
-intent_tags: ["退款", "订单查询"]
 ```
 
 ---
@@ -303,13 +302,13 @@ LLM 看到完整上下文（M1 + tool_result + M2 + M3）→ 回复
 
 ### 7.3 整体流程
 
+```
 ┌─────────────────────────────────────────┐
 │  Agent Loop（直到问题解决或超时）         │
 │  每轮：                                  │
 │  ├── 1. 消费队列中所有消息 → history     │
-│  ├── 2. 预检索（并行）                   │
-│  │     ├── 知识库检索                    │
-│  │     └── 长期记忆检索（按需）           │
+│  ├── 2. 预检索                           │
+│  │     └── 知识库检索                    │
 │  ├── 3. 前置规则检查（空 → 转人工）      │
 │  ├── 4. 构建 Context                    │
 │  ├── 5. 调用 LLM（全部工具）            │
@@ -321,6 +320,7 @@ LLM 看到完整上下文（M1 + tool_result + M2 + M3）→ 回复
 └─────────────────────────────────────────┘
   ↓
   流式输出最终回复
+```
 
 ### 7.4 工具注册
 
@@ -497,8 +497,8 @@ enum Modality { TEXT = 0; VOICE = 1; }
 
 | 阶段 | 目标延迟 | 实现方式 |
 |---|---|---|
-| 预检索（并行） | <200ms | 知识库向量检索 + 长期记忆检索并行 |
-| LLM 首 token | <500ms | 流式 SSE，首次 chunk 到达即开始输出 |
+| 预检索 | <200ms | 知识库向量检索 |
+| LLM 首 token | <500ms | 流式，首次 chunk 到达即开始输出 |
 | 工具执行 | <500ms | 工具自身实现需满足，超时则跳过 |
 | 中间回复 | 0ms | 模板注入，不调 LLM |
 | 会话摘要生成 | 不计入响应延迟 | 会话结束后异步执行 |
@@ -507,8 +507,263 @@ enum Modality { TEXT = 0; VOICE = 1; }
 
 ## 13. 待讨论项
 
-- [ ] 配置文件格式（YAML/TOML 的具体 schema）
-- [ ] 监控与可观测性（tracing、metrics）
-- [ ] 测试策略（单元测试、集成测试、mock LLM）
-- [ ] 语音模式完整链路（ASR → Agent → TTS）
+- [ ] 监控与可观测性（tracing/metrics）
 - [ ] OCC 集成方式（git 依赖的 patch 配置）
+
+---
+
+## 14. 跨语言 SDK 方案
+
+### 14.1 方案对比
+
+| 方案 | 复杂度 | 语言支持 | 性能 | 说明 |
+|---|---|---|---|---|
+| **Rust SDK（lib crate）** | 低 | Rust only | 最好 | OCC 直接依赖 |
+| **gRPC API（bin crate）** | 低 | 任意语言 | 好（网络开销） | proto 生成客户端 |
+| **FFI（C ABI）** | 高 | 需要每种语言 binding | 最好 | 不推荐 |
+| **PyO3（Python）** | 中 | Python | 好（进程内） | Python 生态集成 |
+
+### 14.2 推荐方案
+
+**gRPC 已经是跨语言方案**，不需要额外提供其他语言 SDK：
+
+- **Rust（OCC）**：直接依赖 lib crate，零开销
+- **其他语言（Java/Python/Go）**：通过 gRPC 调用 seat-agent-server
+
+### 14.3 使用方式
+
+```
+seat-agent/
+├── crates/
+│   ├── core/          ← Rust 调用方（OCC）直接依赖
+│   ├── tools/
+│   ├── memory/
+│   └── server/        ← 其他语言通过 gRPC 调用
+└── proto/
+    └── seat_agent.proto  ← 其他语言生成客户端
+```
+
+| 调用方语言 | 对接方式 | 开销 | 说明 |
+|---|---|---|---|
+| **Rust（OCC）** | lib crate | 零 | 直接依赖 `seat-agent-core` |
+| **Rust（独立）** | bin（gRPC） | 网络 | 调用 `seat-agent-server` |
+| **Java** | bin（gRPC） | 网络 | `protoc --java_out=. seat_agent.proto` |
+| **Python** | bin（gRPC） | 网络 | `python -m grpc_tools.protoc` |
+| **Go** | bin（gRPC） | 网络 | `protoc --go_out=. seat_agent.proto` |
+
+### 14.4 生成客户端示例
+
+```bash
+# Python
+python -m grpc_tools.protoc -I protos --python_out=. protos/seat_agent.proto
+
+# Java
+protoc --java_out=. protos/seat_agent.proto
+
+# Go
+protoc --go_out=. protos/seat_agent.proto
+```
+
+### 14.5 为什么不需要额外 SDK
+
+1. **gRPC 已经是跨语言方案**：proto 文件生成任意语言客户端，seat-agent-server 已经实现
+2. **OCC 是 Rust**：直接用 lib crate，不需要跨语言
+3. **保持简单**：v1 只维护 Rust SDK，gRPC API 是自然产物
+4. **如果需要 Python SDK**：可以用 PyO3 绑定（seat-agent 已经支持 PyO3 可选）
+
+---
+
+## 15. 配置文件设计（server crate）
+
+### 15.1 配置文件结构
+
+```yaml
+# agent.yaml — seat-agent-server 启动配置
+
+server:
+  listen: "0.0.0.0:50051"
+  max_connections: 1000
+
+llm:
+  type: "openai"                      # 或 "anthropic"、"ollama"、"custom"
+  endpoint: "https://api.openai.com/v1"
+  api_key: "${OPENAI_API_KEY}"        # 环境变量引用
+  model: "gpt-4o"
+  temperature: 0.7
+  timeout: 30s
+
+knowledge:
+  type: "qdrant"                      # 或 "memory"（内存测试用）
+  endpoint: "http://localhost:6333"
+  collection: "knowledge_base"
+
+memory:
+  type: "redis"                       # 或 "memory"（内存测试用）
+  endpoint: "redis://localhost:6379"
+  ttl: 3600
+
+tools:
+  - name: "knowledge_search"
+    enabled: true
+  - name: "order_query"
+    enabled: true
+  - name: "refund_apply"
+    enabled: true
+  - name: "transfer_to_human"
+    enabled: true
+
+agent:
+  modality: "text"                    # "text" 或 "voice"
+  max_rounds: 10
+  max_duration: "30s"
+  max_output_tokens: 500
+```
+
+### 15.2 配置结构定义
+
+```rust
+// server/src/config.rs
+
+#[derive(Deserialize)]
+pub struct ServerConfig {
+    pub listen: String,
+    pub max_connections: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct LlmConfig {
+    pub r#type: String,
+    pub endpoint: String,
+    pub api_key: String,
+    pub model: String,
+    pub temperature: Option<f32>,
+    pub timeout: Option<Duration>,
+}
+
+#[derive(Deserialize)]
+pub struct KnowledgeConfig {
+    pub r#type: String,
+    pub endpoint: String,
+    pub collection: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct MemoryConfig {
+    pub r#type: String,
+    pub endpoint: String,
+    pub ttl: Option<u64>,
+}
+
+#[derive(Deserialize)]
+pub struct ToolConfig {
+    pub name: String,
+    pub enabled: bool,
+}
+
+#[derive(Deserialize)]
+pub struct AgentConfigFile {
+    pub server: ServerConfig,
+    pub llm: LlmConfig,
+    pub knowledge: KnowledgeConfig,
+    pub memory: MemoryConfig,
+    pub tools: Vec<ToolConfig>,
+    pub agent: AgentConfig,
+}
+```
+
+### 15.3 启动流程
+
+```rust
+// server/src/main.rs
+
+#[tokio::main]
+async fn main() {
+    // 1. 读取配置文件
+    let config_path = std::env::args().nth(1).unwrap_or("agent.yaml".into());
+    let config = load_config(&config_path);
+
+    // 2. 根据配置创建 LLM client
+    let llm: Box<dyn LlmClient> = match config.llm.r#type.as_str() {
+        "openai" => Box::new(OpenAiLlmClient::new(&config.llm)),
+        "anthropic" => Box::new(AnthropicLlmClient::new(&config.llm)),
+        "ollama" => Box::new(OllamaLlmClient::new(&config.llm)),
+        _ => panic!("Unknown LLM type"),
+    };
+
+    // 3. 根据配置创建 KnowledgeStore
+    let knowledge: Box<dyn KnowledgeStore> = match config.knowledge.r#type.as_str() {
+        "qdrant" => Box::new(QdrantKnowledge::new(&config.knowledge)),
+        "memory" => Box::new(MemoryKnowledge::new()),
+        _ => panic!("Unknown knowledge type"),
+    };
+
+    // 4. 根据配置创建 MemoryStore
+    let memory: Box<dyn MemoryStore> = match config.memory.r#type.as_str() {
+        "redis" => Box::new(RedisMemory::new(&config.memory)),
+        "memory" => Box::new(MemoryMemory::new()),
+        _ => panic!("Unknown memory type"),
+    };
+
+    // 5. 创建 Agent
+    let mut agent = Agent::new(config.agent.clone(), llm);
+    agent.set_knowledge(knowledge);
+    agent.set_memory(memory);
+
+    // 6. 注册工具
+    for tool_config in &config.tools {
+        if tool_config.enabled {
+            match tool_config.name.as_str() {
+                "knowledge_search" => agent.register_tool(Box::new(KnowledgeSearchTool)),
+                "order_query" => agent.register_tool(Box::new(OrderQueryTool)),
+                // ...
+            }
+        }
+    }
+
+    // 7. 启动 gRPC server
+    let grpc_server = GrpcServer::new(agent, &config.server);
+    grpc_server.serve().await;
+}
+```
+
+### 15.4 环境变量支持
+
+配置文件支持 `${ENV_VAR}` 语法：
+
+```rust
+// server/src/config.rs
+
+fn expand_env_vars(s: &str) -> String {
+    let re = regex::Regex::new(r"\$\{(\w+)\}").unwrap();
+    re.replace_all(s, |caps: &regex::Captures| {
+        let var_name = &caps[1];
+        std::env::var(var_name).unwrap_or_default()
+    }).to_string()
+}
+```
+
+### 15.5 运行方式
+
+```bash
+# 默认配置
+seat-agent-server
+
+# 指定配置文件
+seat-agent-server --config /etc/agent/agent.yaml
+
+# 命令行参数覆盖
+seat-agent-server --config agent.yaml --llm-model gpt-4-turbo
+
+# 环境变量
+export OPENAI_API_KEY=sk-xxx
+seat-agent-server --config agent.yaml
+```
+
+### 15.6 配置层划分
+
+| 层 | 配置来源 | 谁负责 |
+|---|---|---|
+| **core crate** | `AgentConfig`（行为配置） | 调用方传入 |
+| **server crate** | `agent.yaml`（完整配置） | 启动时读取 |
+| **LLM 连接** | 配置文件 `llm` 部分 | server crate 实现 |
+| **工具注册** | 配置文件 `tools` 部分 | server crate 按配置注册 |
