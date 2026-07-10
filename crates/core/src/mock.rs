@@ -46,9 +46,7 @@ impl MockLlmClient {
 
     /// 获取下一个响应
     fn next_response(&self) -> String {
-        let idx = self
-            .index
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let idx = self.index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let response_idx = idx % self.responses.len();
         self.responses[response_idx].clone()
     }
@@ -74,9 +72,7 @@ impl LlmClient for MockLlmClient {
             }
 
             // 发送内容
-            let _ = tx
-                .send(Ok(LlmStreamChunk::Content(response)))
-                .await;
+            let _ = tx.send(Ok(LlmStreamChunk::Content(response))).await;
 
             // 发送完成信号
             let _ = tx

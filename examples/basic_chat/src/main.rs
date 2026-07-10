@@ -1,9 +1,4 @@
-use std::time::Duration;
-
-use futures::StreamExt;
-use seat_agent_core::{
-    Agent, AgentConfig, AgentEvent, AgentInput, MockLlmClient,
-};
+use seat_agent_core::{Agent, AgentConfig, AgentEvent, AgentInput, MockLlmClient};
 
 /// 简单的问候工具
 struct GreetTool;
@@ -28,9 +23,7 @@ impl seat_agent_core::Tool for GreetTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> seat_agent_core::Result<String> {
-        let name = args["name"]
-            .as_str()
-            .unwrap_or("World");
+        let name = args["name"].as_str().unwrap_or("World");
         Ok(format!("你好，{}！", name))
     }
 }
@@ -48,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 创建 Agent
     let config = AgentConfig::default();
     let mut agent = Agent::new(config, Box::new(mock_llm));
-    
+
     // 注册工具
     agent.register_tool(Box::new(GreetTool));
 
@@ -67,9 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 启动 Agent 处理
-    let handle = tokio::spawn(async move {
-        agent.on_message(input, tx).await
-    });
+    let handle = tokio::spawn(async move { agent.on_message(input, tx).await });
 
     // 接收并打印输出
     println!("=== Agent 输出 ===\n");
@@ -78,7 +69,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             AgentEvent::StreamStart => println!("[流开始]"),
             AgentEvent::Token(token) => print!("{}", token),
             AgentEvent::StreamEnd => println!("\n[流结束]"),
-            AgentEvent::ToolCallStart { tool_name, arguments } => {
+            AgentEvent::ToolCallStart {
+                tool_name,
+                arguments,
+            } => {
                 println!("[工具调用] {} ({})", tool_name, arguments);
             }
             AgentEvent::ToolCallEnd { tool_name, result } => {
