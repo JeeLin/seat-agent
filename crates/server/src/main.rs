@@ -6,10 +6,14 @@ use anyhow::Result;
 use config::AppConfig;
 use redis_store::RedisSessionStore;
 use seat_agent_core::vector_store::InMemoryVectorStore;
-use seat_agent_core::VectorStore;
+use seat_agent_core::{BusinessBackend, VectorStore};
+use seat_agent_tools::business::{
+    ComplaintQueryTool, MockBusinessBackend, OrderQueryTool, RefundQueryTool,
+};
 use seat_agent_tools::embedding::OpenAiEmbeddingClient;
 use seat_agent_tools::knowledge::KnowledgeSearchTool;
 use seat_agent_tools::registry::ToolRegistry;
+use seat_agent_tools::transfer::TransferToHumanTool;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -65,6 +69,23 @@ async fn main() -> Result<()> {
     );
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(knowledge_tool));
+    tracing::info!(
+        "已注册工具: {}",
+        registry
+            .tool_definitions()
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    // 构建业务后端（默认 Mock，真实 HTTP 后端为后续里程碑）
+    let backend: Arc<dyn BusinessBackend> = Arc::new(MockBusinessBackend::new());
+
+    // 注册业务查询工具（订单/退款/投诉）+ 转人工工具，与知识库工具共存
+    registry.register(Box::new(OrderQueryTool::new(backend.clone())));
+    registry.register(Box::new(RefundQueryTool::new(backend.clone())));
+    registry.register(Box::new(ComplaintQueryTool::new(backend.clone())));
+    registry.register(Box::new(TransferToHumanTool::new()));
     tracing::info!(
         "已注册工具: {}",
         registry
