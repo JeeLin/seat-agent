@@ -3,8 +3,7 @@ use crate::context::{AgentEvent, AgentInput, Message};
 use crate::error::AgentError;
 use crate::mock::MockLlmClient;
 use crate::traits::{
-    FinishReason, LlmClient, LlmMessage, LlmRequest, LlmStreamChunk, MessageRole, Tool,
-    ToolDefinition,
+    FinishReason, LlmClient, LlmRequest, LlmStreamChunk, MessageRole, Tool, ToolDefinition,
 };
 use crate::Agent;
 
@@ -34,11 +33,7 @@ impl LlmClient for ToolCallMockLlmClient {
         &self,
         _request: LlmRequest,
     ) -> crate::Result<
-        std::pin::Pin<
-            Box<
-                dyn futures::Stream<Item = crate::Result<LlmStreamChunk>> + Send,
-            >,
-        >,
+        std::pin::Pin<Box<dyn futures::Stream<Item = crate::Result<LlmStreamChunk>> + Send>>,
     > {
         let idx = self.index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let response_idx = idx % self.responses.len();
@@ -151,9 +146,7 @@ async fn test_on_message_direct_reply() {
 
     // Should have: StreamStart, Token("Hello there!"), StreamEnd
     assert!(matches!(events.first(), Some(AgentEvent::StreamStart)));
-    assert!(
-        matches!(&events[1], AgentEvent::Token(t) if t == "Hello there!")
-    );
+    assert!(matches!(&events[1], AgentEvent::Token(t) if t == "Hello there!"));
     assert!(matches!(events.last(), Some(AgentEvent::StreamEnd)));
 }
 
@@ -192,12 +185,22 @@ async fn test_on_message_two_round_tool_call_and_reply() {
 
     let tokens: Vec<&str> = events
         .iter()
-        .filter_map(|e| if let AgentEvent::Token(t) = e { Some(t.as_str()) } else { None })
+        .filter_map(|e| {
+            if let AgentEvent::Token(t) = e {
+                Some(t.as_str())
+            } else {
+                None
+            }
+        })
         .collect();
     let tool_results: Vec<&str> = events
         .iter()
         .filter_map(|e| {
-            if let AgentEvent::ToolCallEnd { result, .. } = e { Some(result.as_str()) } else { None }
+            if let AgentEvent::ToolCallEnd { result, .. } = e {
+                Some(result.as_str())
+            } else {
+                None
+            }
         })
         .collect();
     assert!(
@@ -290,14 +293,21 @@ async fn test_on_message_error_propagation() {
     let llm = Box::new(MockLlmClient::new(vec![]).with_error());
     let agent = Agent::new(AgentConfig::default(), llm);
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+    let (tx, _rx) = tokio::sync::mpsc::channel(100);
     let input = make_user_input("test");
 
     // LLM error propagates via `?` from chat_stream through on_message
     let result = agent.on_message(input, tx).await;
-    assert!(result.is_err(), "Expected on_message to return Err on LLM failure");
+    assert!(
+        result.is_err(),
+        "Expected on_message to return Err on LLM failure"
+    );
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("Mock error"), "Expected mock error message: {}", err_msg);
+    assert!(
+        err_msg.contains("Mock error"),
+        "Expected mock error message: {}",
+        err_msg
+    );
 }
 
 #[tokio::test]
@@ -385,8 +395,11 @@ async fn test_on_message_unknown_tool() {
     let events = collect_events(&mut rx).await;
 
     // Should have ToolCallEnd with "工具不存在" message
-    let tool_end = events.iter().find(|e| {
-        matches!(e, AgentEvent::ToolCallEnd { tool_name, .. } if tool_name == "nonexistent")
-    });
-    assert!(tool_end.is_some(), "Expected ToolCallEnd for nonexistent tool");
+    let tool_end = events.iter().find(
+        |e| matches!(e, AgentEvent::ToolCallEnd { tool_name, .. } if tool_name == "nonexistent"),
+    );
+    assert!(
+        tool_end.is_some(),
+        "Expected ToolCallEnd for nonexistent tool"
+    );
 }

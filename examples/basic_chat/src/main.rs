@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use seat_agent_core::{
-    Agent, AgentConfig, AgentEvent, AgentInput, BusinessBackend, LlmClient,
-    LlmRequest, LlmStreamChunk, Message, MessageRole,
+    Agent, AgentConfig, AgentEvent, AgentInput, BusinessBackend, LlmClient, LlmRequest,
+    LlmStreamChunk, Message, MessageRole,
 };
 use seat_agent_tools::business::{
     ComplaintQueryTool, MockBusinessBackend, OrderQueryTool, RefundQueryTool,
@@ -32,7 +32,9 @@ impl LlmClient for JsonToolCallMock {
         &self,
         _req: LlmRequest,
     ) -> seat_agent_core::Result<
-        std::pin::Pin<Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>>,
+        std::pin::Pin<
+            Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>,
+        >,
     > {
         let i = self.idx.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let resp = &self.responses[i % self.responses.len()];
@@ -42,19 +44,19 @@ impl LlmClient for JsonToolCallMock {
 
         let chunks: Vec<seat_agent_core::Result<LlmStreamChunk>> = match parsed {
             Ok(serde_json::Value::Object(obj)) if obj.contains_key("tool_calls") => {
-                let calls = obj["tool_calls"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default();
+                let calls = obj["tool_calls"].as_array().cloned().unwrap_or_default();
                 let mut result = Vec::new();
                 for call in &calls {
                     let id = call["id"].as_str().unwrap_or("unknown").to_string();
-                    let name = call["function"]["name"].as_str().unwrap_or("unknown").to_string();
-                    let args = call["function"]["arguments"].as_str().unwrap_or("{}").to_string();
-                    result.push(Ok(LlmStreamChunk::ToolCallStart {
-                        id,
-                        name,
-                    }));
+                    let name = call["function"]["name"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let args = call["function"]["arguments"]
+                        .as_str()
+                        .unwrap_or("{}")
+                        .to_string();
+                    result.push(Ok(LlmStreamChunk::ToolCallStart { id, name }));
                     result.push(Ok(LlmStreamChunk::ToolCallDelta { arguments: args }));
                 }
                 result.push(Ok(LlmStreamChunk::Done {
@@ -69,7 +71,7 @@ impl LlmClient for JsonToolCallMock {
                 }),
             ],
         };
-         let stream = tokio_stream::iter(chunks);
+        let stream = tokio_stream::iter(chunks);
         Ok(Box::pin(stream))
     }
 }
@@ -121,7 +123,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             AgentEvent::StreamStart => {}
             AgentEvent::Token(token) => print!("{}", token),
             AgentEvent::StreamEnd => println!(),
-            AgentEvent::ToolCallStart { tool_name, arguments } => {
+            AgentEvent::ToolCallStart {
+                tool_name,
+                arguments,
+            } => {
                 println!("  [调用工具] {} ({})", tool_name, arguments);
             }
             AgentEvent::ToolCallEnd { tool_name, result } => {

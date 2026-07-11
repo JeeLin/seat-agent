@@ -198,13 +198,15 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "basic_chat"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "futures",
  "seat-agent-core",
+ "seat-agent-tools",
  "serde_json",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -1826,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "seat-agent-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1841,7 +1843,7 @@ dependencies = [
 
 [[package]]
 name = "seat-agent-memory"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1855,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "seat-agent-server"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1879,9 +1881,10 @@ dependencies = [
 
 [[package]]
 name = "seat-agent-tools"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
+ "futures",
  "qdrant-client",
  "reqwest 0.11.27",
  "seat-agent-core",
@@ -2594,6 +2597,19 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
+name = "voice_chat"
+version = "0.5.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "seat-agent-core",
+ "seat-agent-tools",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+]
 
 [[package]]
 name = "want"

@@ -160,8 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_llm_with_delay() {
-        let mock =
-            MockLlmClient::new(vec!["delayed".into()]).with_delay(Duration::from_millis(10));
+        let mock = MockLlmClient::new(vec!["delayed".into()]).with_delay(Duration::from_millis(10));
         let request = LlmRequest {
             messages: vec![],
             tools: vec![],

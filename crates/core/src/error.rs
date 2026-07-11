@@ -75,7 +75,11 @@ mod tests {
     fn test_error_display_timeout() {
         let err = AgentError::Timeout(Duration::from_secs(5));
         let msg = format!("{}", err);
-        assert!(msg.contains("5s"), "Expected 5s in timeout message: {}", msg);
+        assert!(
+            msg.contains("5s"),
+            "Expected 5s in timeout message: {}",
+            msg
+        );
     }
 
     #[test]

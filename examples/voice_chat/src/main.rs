@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use seat_agent_core::{
-    Agent, AgentConfig, AgentEvent, AgentInput, BusinessBackend, LlmClient,
-    LlmRequest, LlmStreamChunk, Message, MessageRole,
+    Agent, AgentConfig, AgentEvent, AgentInput, BusinessBackend, LlmClient, LlmRequest,
+    LlmStreamChunk, Message, MessageRole,
 };
 use seat_agent_tools::business::{ComplaintQueryTool, MockBusinessBackend, OrderQueryTool};
 use seat_agent_tools::transfer::TransferToHumanTool;
@@ -29,7 +29,9 @@ impl LlmClient for JsonToolCallMock {
         &self,
         _req: LlmRequest,
     ) -> seat_agent_core::Result<
-        std::pin::Pin<Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>>,
+        std::pin::Pin<
+            Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>,
+        >,
     > {
         let i = self.idx.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let resp = &self.responses[i % self.responses.len()];
@@ -42,8 +44,14 @@ impl LlmClient for JsonToolCallMock {
                 let mut result = Vec::new();
                 for call in &calls {
                     let id = call["id"].as_str().unwrap_or("unknown").to_string();
-                    let name = call["function"]["name"].as_str().unwrap_or("unknown").to_string();
-                    let args = call["function"]["arguments"].as_str().unwrap_or("{}").to_string();
+                    let name = call["function"]["name"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let args = call["function"]["arguments"]
+                        .as_str()
+                        .unwrap_or("{}")
+                        .to_string();
                     result.push(Ok(LlmStreamChunk::ToolCallStart { id, name }));
                     result.push(Ok(LlmStreamChunk::ToolCallDelta { arguments: args }));
                 }
@@ -107,7 +115,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             AgentEvent::StreamStart => {}
             AgentEvent::Token(token) => print!("[语音] {}", token),
             AgentEvent::StreamEnd => println!(),
-            AgentEvent::ToolCallStart { tool_name, arguments } => {
+            AgentEvent::ToolCallStart {
+                tool_name,
+                arguments,
+            } => {
                 println!("  [工具] {} ({})", tool_name, arguments);
             }
             AgentEvent::ToolCallEnd { tool_name, result } => {
@@ -124,7 +135,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     handle.await??;
     println!("\n=== 语音演示完成 ===");
-    println!("注：语音模式 max_rounds={}，超过此限制将强制结束", max_rounds);
+    println!(
+        "注：语音模式 max_rounds={}，超过此限制将强制结束",
+        max_rounds
+    );
 
     Ok(())
 }

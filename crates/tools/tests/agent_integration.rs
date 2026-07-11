@@ -1,13 +1,11 @@
 //! Integration tests for Agent + Tools cross-crate flow.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use seat_agent_core::{
-    AgentConfig, AgentEvent, AgentInput, LlmClient, LlmMessage, LlmRequest, LlmStreamChunk,
-    Message, MessageRole, Modality, Tool, ToolCall, ToolDefinition,
+    AgentConfig, AgentEvent, AgentInput, LlmClient, LlmRequest, LlmStreamChunk, Message,
+    MessageRole, Modality, Tool, ToolDefinition,
 };
 use tokio::sync::mpsc;
 
@@ -36,7 +34,9 @@ impl LlmClient for ToolCallMock {
         &self,
         _req: LlmRequest,
     ) -> seat_agent_core::Result<
-        std::pin::Pin<Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>>,
+        std::pin::Pin<
+            Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>,
+        >,
     > {
         let i = self.idx.fetch_add(1, Ordering::SeqCst);
         let chunks = self.responses[i % self.responses.len()].clone();
@@ -53,7 +53,9 @@ impl LlmClient for ErrorMock {
         &self,
         _req: LlmRequest,
     ) -> seat_agent_core::Result<
-        std::pin::Pin<Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>>,
+        std::pin::Pin<
+            Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>,
+        >,
     > {
         Err(seat_agent_core::AgentError::Llm("LLM unavailable".into()))
     }
@@ -117,7 +119,13 @@ async fn collect(rx: &mut mpsc::Receiver<AgentEvent>) -> Vec<AgentEvent> {
 fn token_texts(events: &[AgentEvent]) -> Vec<&str> {
     events
         .iter()
-        .filter_map(|e| if let AgentEvent::Token(t) = e { Some(t.as_str()) } else { None })
+        .filter_map(|e| {
+            if let AgentEvent::Token(t) = e {
+                Some(t.as_str())
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
@@ -128,7 +136,7 @@ fn token_texts(events: &[AgentEvent]) -> Vec<&str> {
 #[tokio::test]
 async fn integration_direct_reply() {
     let llm = Box::new(seat_agent_core::MockLlmClient::new(vec![
-        "Direct answer".into(),
+        "Direct answer".into()
     ]));
     let agent = seat_agent_core::Agent::new(AgentConfig::default(), llm);
 
@@ -144,13 +152,22 @@ async fn integration_direct_reply() {
 #[tokio::test]
 async fn integration_tool_call_then_final_reply() {
     let tc = vec![
-        LlmStreamChunk::ToolCallStart { id: "c1".into(), name: "echo".into() },
-        LlmStreamChunk::ToolCallDelta { arguments: r#"{"message":"hi"}"#.into() },
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::ToolCalls },
+        LlmStreamChunk::ToolCallStart {
+            id: "c1".into(),
+            name: "echo".into(),
+        },
+        LlmStreamChunk::ToolCallDelta {
+            arguments: r#"{"message":"hi"}"#.into(),
+        },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::ToolCalls,
+        },
     ];
     let final_reply = vec![
         LlmStreamChunk::Content("Got it".into()),
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::Stop },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::Stop,
+        },
     ];
     let llm = Box::new(ToolCallMock::new(vec![tc, final_reply]));
     let mut agent = seat_agent_core::Agent::new(AgentConfig::default(), llm);
@@ -163,7 +180,13 @@ async fn integration_tool_call_then_final_reply() {
     // ToolCallEnd should contain echo result
     let tool_ends: Vec<&str> = events
         .iter()
-        .filter_map(|e| if let AgentEvent::ToolCallEnd { result, .. } = e { Some(result.as_str()) } else { None })
+        .filter_map(|e| {
+            if let AgentEvent::ToolCallEnd { result, .. } = e {
+                Some(result.as_str())
+            } else {
+                None
+            }
+        })
         .collect();
     assert!(tool_ends.iter().any(|r| r.contains("Echo: hi")));
 
@@ -174,15 +197,22 @@ async fn integration_tool_call_then_final_reply() {
 #[tokio::test]
 async fn integration_transfer_to_human() {
     let tc = vec![
-        LlmStreamChunk::ToolCallStart { id: "t1".into(), name: "transfer_to_human".into() },
+        LlmStreamChunk::ToolCallStart {
+            id: "t1".into(),
+            name: "transfer_to_human".into(),
+        },
         LlmStreamChunk::ToolCallDelta {
             arguments: r#"{"reason":"complex issue","reply":"为您转接专属客服"}"#.into(),
         },
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::ToolCalls },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::ToolCalls,
+        },
     ];
     let after = vec![
         LlmStreamChunk::Content("好的".into()),
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::Stop },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::Stop,
+        },
     ];
 
     struct TransferTool;
@@ -218,16 +248,23 @@ async fn integration_transfer_to_human() {
 #[tokio::test]
 async fn integration_max_rounds_enforced() {
     // Keep returning tool calls to hit the round limit
-    let make_tc = |id: &str| vec![
-        LlmStreamChunk::ToolCallStart { id: id.into(), name: "echo".into() },
-        LlmStreamChunk::ToolCallDelta { arguments: r#"{"message":"x"}"#.into() },
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::ToolCalls },
-    ];
+    let make_tc = |id: &str| {
+        vec![
+            LlmStreamChunk::ToolCallStart {
+                id: id.into(),
+                name: "echo".into(),
+            },
+            LlmStreamChunk::ToolCallDelta {
+                arguments: r#"{"message":"x"}"#.into(),
+            },
+            LlmStreamChunk::Done {
+                finish_reason: seat_agent_core::FinishReason::ToolCalls,
+            },
+        ]
+    };
 
     // Generate many tool call responses — more than max_rounds
-    let responses: Vec<Vec<LlmStreamChunk>> = (0..5)
-        .map(|i| make_tc(&format!("c{}", i)))
-        .collect();
+    let responses: Vec<Vec<LlmStreamChunk>> = (0..5).map(|i| make_tc(&format!("c{}", i))).collect();
     let llm = Box::new(ToolCallMock::new(responses));
     let mut agent = seat_agent_core::Agent::new(AgentConfig::default(), llm);
     agent.register_tool(Box::new(EchoTool));
@@ -237,21 +274,37 @@ async fn integration_max_rounds_enforced() {
     let events = collect(&mut rx).await;
 
     // Count tool call rounds — should be at most max_rounds (10 for default config)
-    let tool_call_count = events.iter().filter(|e| matches!(e, AgentEvent::ToolCallStart { .. })).count();
+    let tool_call_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolCallStart { .. }))
+        .count();
     // With max_rounds=10, we should have at most 10 tool calls (but we only provided 5 responses)
-    assert!(tool_call_count <= 10, "Tool calls {} exceeded max_rounds", tool_call_count);
+    assert!(
+        tool_call_count <= 10,
+        "Tool calls {} exceeded max_rounds",
+        tool_call_count
+    );
 }
 
 #[tokio::test]
 async fn integration_tool_execution_failure_continues() {
     let tc = vec![
-        LlmStreamChunk::ToolCallStart { id: "f1".into(), name: "fail".into() },
-        LlmStreamChunk::ToolCallDelta { arguments: "{}".into() },
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::ToolCalls },
+        LlmStreamChunk::ToolCallStart {
+            id: "f1".into(),
+            name: "fail".into(),
+        },
+        LlmStreamChunk::ToolCallDelta {
+            arguments: "{}".into(),
+        },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::ToolCalls,
+        },
     ];
     let final_reply = vec![
         LlmStreamChunk::Content("Recovered".into()),
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::Stop },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::Stop,
+        },
     ];
 
     let llm = Box::new(ToolCallMock::new(vec![tc, final_reply]));
@@ -263,9 +316,9 @@ async fn integration_tool_execution_failure_continues() {
     let events = collect(&mut rx).await;
 
     // Tool call end should have error info
-    let tool_end = events.iter().find(|e| {
-        matches!(e, AgentEvent::ToolCallEnd { tool_name, .. } if tool_name == "fail")
-    });
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolCallEnd { tool_name, .. } if tool_name == "fail"));
     assert!(tool_end.is_some());
 
     // Agent continues to final reply after tool failure
@@ -310,18 +363,34 @@ async fn integration_context_truncation() {
 #[tokio::test]
 async fn integration_multiple_tool_rounds() {
     let tc1 = vec![
-        LlmStreamChunk::ToolCallStart { id: "c1".into(), name: "echo".into() },
-        LlmStreamChunk::ToolCallDelta { arguments: r#"{"message":"first"}"#.into() },
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::ToolCalls },
+        LlmStreamChunk::ToolCallStart {
+            id: "c1".into(),
+            name: "echo".into(),
+        },
+        LlmStreamChunk::ToolCallDelta {
+            arguments: r#"{"message":"first"}"#.into(),
+        },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::ToolCalls,
+        },
     ];
     let tc2 = vec![
-        LlmStreamChunk::ToolCallStart { id: "c2".into(), name: "echo".into() },
-        LlmStreamChunk::ToolCallDelta { arguments: r#"{"message":"second"}"#.into() },
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::ToolCalls },
+        LlmStreamChunk::ToolCallStart {
+            id: "c2".into(),
+            name: "echo".into(),
+        },
+        LlmStreamChunk::ToolCallDelta {
+            arguments: r#"{"message":"second"}"#.into(),
+        },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::ToolCalls,
+        },
     ];
     let final_reply = vec![
         LlmStreamChunk::Content("Done with both".into()),
-        LlmStreamChunk::Done { finish_reason: seat_agent_core::FinishReason::Stop },
+        LlmStreamChunk::Done {
+            finish_reason: seat_agent_core::FinishReason::Stop,
+        },
     ];
 
     let llm = Box::new(ToolCallMock::new(vec![tc1, tc2, final_reply]));
@@ -332,12 +401,21 @@ async fn integration_multiple_tool_rounds() {
     agent.on_message(user_input("multi"), tx).await.unwrap();
     let events = collect(&mut rx).await;
 
-    let tool_count = events.iter().filter(|e| matches!(e, AgentEvent::ToolCallStart { .. })).count();
+    let tool_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolCallStart { .. }))
+        .count();
     assert_eq!(tool_count, 2, "Expected 2 tool call rounds");
 
     let tool_results: Vec<&str> = events
         .iter()
-        .filter_map(|e| if let AgentEvent::ToolCallEnd { result, .. } = e { Some(result.as_str()) } else { None })
+        .filter_map(|e| {
+            if let AgentEvent::ToolCallEnd { result, .. } = e {
+                Some(result.as_str())
+            } else {
+                None
+            }
+        })
         .collect();
     assert!(tool_results.iter().any(|r| r.contains("first")));
     assert!(tool_results.iter().any(|r| r.contains("second")));
