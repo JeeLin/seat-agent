@@ -214,6 +214,28 @@ pub fn example_tool_config() -> &'static str {
       "error_reply": "抱歉，退款查询暂时不可用"
     },
     {
+      "name": "complaint_query",
+      "display_name": "投诉查询",
+      "description": "查询投诉处理进度（状态、渠道、进度、责任人）",
+      "category": "info_query",
+      "enabled": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "complaint_id": {
+            "type": "string",
+            "description": "投诉单号"
+          }
+        },
+        "required": ["complaint_id"]
+      },
+      "intermediate_reply": {
+        "text": "正在查询投诉进度...",
+        "audio_cue": "sounds/keyboard_typing.mp3"
+      },
+      "error_reply": "抱歉，投诉查询暂时不可用"
+    },
+    {
       "name": "transfer_to_human",
       "display_name": "转人工客服",
       "description": "转接人工客服",
