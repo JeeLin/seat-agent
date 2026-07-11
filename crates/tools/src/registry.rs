@@ -192,6 +192,28 @@ pub fn example_tool_config() -> &'static str {
       "error_reply": "抱歉，订单查询暂时不可用"
     },
     {
+      "name": "refund_query",
+      "display_name": "退款查询",
+      "description": "查询退款信息（状态、金额、原因、进度）",
+      "category": "info_query",
+      "enabled": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "refund_id": {
+            "type": "string",
+            "description": "退款单号"
+          }
+        },
+        "required": ["refund_id"]
+      },
+      "intermediate_reply": {
+        "text": "正在查询退款...",
+        "audio_cue": "sounds/keyboard_typing.mp3"
+      },
+      "error_reply": "抱歉，退款查询暂时不可用"
+    },
+    {
       "name": "transfer_to_human",
       "display_name": "转人工客服",
       "description": "转接人工客服",
