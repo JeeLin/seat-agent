@@ -280,3 +280,193 @@ fn build_default_system_prompt(modality: &Modality) -> String {
         Modality::Voice => format!("{}\n\n回复必须简短（<100字），口语化，适合语音播放。", base),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::traits::KnowledgeResult;
+    use std::collections::HashMap;
+
+    fn text_config() -> AgentConfig {
+        AgentConfig::default()
+    }
+
+    fn voice_config() -> AgentConfig {
+        AgentConfig::voice()
+    }
+
+    #[test]
+    fn test_context_new_text_mode() {
+        let ctx = Context::new("s1".into(), text_config());
+        assert_eq!(ctx.session_id, "s1");
+        assert_eq!(ctx.system.len(), 1);
+        assert_eq!(ctx.system[0].role, MessageRole::System);
+        assert!(ctx.system[0].content.contains("客服助手"));
+        assert!(ctx.system[0].content.contains("分段清晰"));
+    }
+
+    #[test]
+    fn test_context_new_voice_mode() {
+        let ctx = Context::new("s2".into(), voice_config());
+        assert_eq!(ctx.modality, Modality::Voice);
+        assert!(ctx.system[0].content.contains("简短"));
+    }
+
+    #[test]
+    fn test_context_custom_system_prompt() {
+        let mut config = text_config();
+        config.system_prompt = Some("Custom prompt".into());
+        let ctx = Context::new("s3".into(), config);
+        assert_eq!(ctx.system[0].content, "Custom prompt");
+    }
+
+    #[test]
+    fn test_add_user_message() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        ctx.add_user_message("hello".into());
+        assert_eq!(ctx.history.len(), 1);
+        assert_eq!(ctx.history[0].role, MessageRole::User);
+        assert_eq!(ctx.history[0].content, "hello");
+    }
+
+    #[test]
+    fn test_add_assistant_message() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        ctx.add_assistant_message("hi".into(), None);
+        assert_eq!(ctx.history.len(), 1);
+        assert_eq!(ctx.history[0].role, MessageRole::Assistant);
+    }
+
+    #[test]
+    fn test_add_tool_result() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        ctx.add_tool_result("call_1".into(), "result".into());
+        assert_eq!(ctx.working.len(), 1);
+        assert_eq!(ctx.working[0].role, MessageRole::Tool);
+        assert_eq!(ctx.working[0].tool_call_id.as_deref(), Some("call_1"));
+    }
+
+    #[test]
+    fn test_build_messages_order() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        ctx.set_history_summary(Some("past summary".into()));
+        ctx.set_retrieval(vec![KnowledgeResult {
+            id: "k1".into(),
+            content: "retrieval text".into(),
+            score: 0.9,
+            metadata: HashMap::new(),
+        }]);
+        ctx.add_user_message("user msg".into());
+        ctx.add_tool_result("call_1".into(), "tool result".into());
+
+        let msgs = ctx.build_messages();
+        // Expected order: system, summary, retrieval, history(user), working(tool)
+        assert!(msgs.len() >= 5);
+        assert_eq!(msgs[0].role, MessageRole::System);
+        // msgs[1] = summary (System role with "历史会话摘要")
+        assert!(
+            msgs[1].content.contains("历史会话摘要"),
+            "Expected summary at index 1"
+        );
+        // msgs[2] = retrieval
+        assert!(
+            msgs[2].content.contains("retrieval text"),
+            "Expected retrieval at index 2"
+        );
+        // msgs[3] = user history
+        assert_eq!(msgs[3].role, MessageRole::User);
+        assert_eq!(msgs[3].content, "user msg");
+        // msgs[4] = tool result
+        assert_eq!(msgs[4].role, MessageRole::Tool);
+    }
+
+    #[test]
+    fn test_build_messages_without_optional_layers() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        ctx.add_user_message("msg".into());
+        let msgs = ctx.build_messages();
+        // system + history only
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].role, MessageRole::System);
+        assert_eq!(msgs[1].role, MessageRole::User);
+    }
+
+    #[test]
+    fn test_flush_working_to_history() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        ctx.add_tool_result("c1".into(), "r1".into());
+        ctx.add_tool_result("c2".into(), "r2".into());
+        assert_eq!(ctx.working.len(), 2);
+        assert_eq!(ctx.history.len(), 0);
+
+        ctx.flush_working_to_history();
+        assert_eq!(ctx.working.len(), 0);
+        assert_eq!(ctx.history.len(), 2);
+        assert_eq!(ctx.history[0].tool_call_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn test_clear_working() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        ctx.add_tool_result("c1".into(), "r1".into());
+        ctx.clear_working();
+        assert!(ctx.working.is_empty());
+    }
+
+    #[test]
+    fn test_truncate_history() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        for i in 0..10 {
+            ctx.add_user_message(format!("msg{}", i));
+        }
+        assert_eq!(ctx.history.len(), 10);
+
+        ctx.truncate_history();
+        // min_history_messages defaults to 2
+        assert_eq!(ctx.history.len(), 2);
+        // Should keep the last 2
+        assert_eq!(ctx.history[0].content, "msg8");
+        assert_eq!(ctx.history[1].content, "msg9");
+    }
+
+    #[test]
+    fn test_truncate_history_preserves_min() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        ctx.add_user_message("a".into());
+        ctx.add_user_message("b".into());
+        ctx.truncate_history();
+        assert_eq!(ctx.history.len(), 2);
+    }
+
+    #[test]
+    fn test_estimate_tokens() {
+        let mut ctx = Context::new("s1".into(), text_config());
+        // System prompt is ~200 chars → ~50 tokens
+        let base = ctx.estimate_tokens();
+        assert!(base > 0);
+
+        ctx.add_user_message("hello world".into()); // 11 chars → 2 tokens
+        let after_msg = ctx.estimate_tokens();
+        assert!(after_msg > base);
+
+        ctx.set_history_summary(Some("a summary here".into())); // 14 chars → 3 tokens
+        let after_summary = ctx.estimate_tokens();
+        assert!(after_summary > after_msg);
+
+        ctx.set_retrieval(vec![KnowledgeResult {
+            id: "k1".into(),
+            content: "retrieval content".into(),
+            score: 0.9,
+            metadata: HashMap::new(),
+        }]);
+        let after_retrieval = ctx.estimate_tokens();
+        assert!(after_retrieval > after_summary);
+    }
+
+    #[test]
+    fn test_estimate_tokens_empty_context() {
+        let ctx = Context::new("s1".into(), text_config());
+        // System prompt alone should have tokens
+        assert!(ctx.estimate_tokens() > 0);
+    }
+}

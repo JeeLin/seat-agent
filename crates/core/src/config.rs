@@ -67,3 +67,60 @@ impl AgentConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = AgentConfig::default();
+        assert_eq!(config.modality, Modality::Text);
+        assert_eq!(config.max_rounds, 10);
+        assert_eq!(config.max_duration, Duration::from_secs(30));
+        assert_eq!(config.max_output_tokens, 500);
+        assert_eq!(config.min_history_messages, 2);
+        assert_eq!(config.total_token_limit, 8000);
+        assert!(config.system_prompt.is_none());
+    }
+
+    #[test]
+    fn test_text_factory() {
+        let config = AgentConfig::text();
+        assert_eq!(config.modality, Modality::Text);
+        assert_eq!(config.max_rounds, 10);
+    }
+
+    #[test]
+    fn test_voice_factory() {
+        let config = AgentConfig::voice();
+        assert_eq!(config.modality, Modality::Voice);
+        assert_eq!(config.max_rounds, 2);
+        assert_eq!(config.max_output_tokens, 200);
+        // Other fields should use defaults
+        assert_eq!(config.max_duration, Duration::from_secs(30));
+        assert_eq!(config.min_history_messages, 2);
+    }
+
+    #[test]
+    fn test_config_serialization_roundtrip() {
+        let config = AgentConfig::voice();
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.modality, Modality::Voice);
+        assert_eq!(deserialized.max_rounds, 2);
+        assert_eq!(deserialized.max_output_tokens, 200);
+    }
+
+    #[test]
+    fn test_modality_serialization() {
+        let text_json = serde_json::to_string(&Modality::Text).unwrap();
+        assert_eq!(text_json, "\"Text\"");
+
+        let voice_json = serde_json::to_string(&Modality::Voice).unwrap();
+        assert_eq!(voice_json, "\"Voice\"");
+
+        let deserialized: Modality = serde_json::from_str("\"Text\"").unwrap();
+        assert_eq!(deserialized, Modality::Text);
+    }
+}

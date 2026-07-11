@@ -264,3 +264,216 @@ pub fn example_tool_config() -> &'static str {
   ]
 }"#
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use seat_agent_core::ToolDefinition;
+
+    struct DummyTool;
+
+    #[async_trait::async_trait]
+    impl seat_agent_core::Tool for DummyTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition {
+                name: "dummy".into(),
+                description: "A dummy tool".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "input": { "type": "string" }
+                    }
+                }),
+            }
+        }
+
+        async fn execute(&self, _args: serde_json::Value) -> seat_agent_core::Result<String> {
+            Ok("done".into())
+        }
+    }
+
+    struct AnotherTool;
+
+    #[async_trait::async_trait]
+    impl seat_agent_core::Tool for AnotherTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition {
+                name: "another".into(),
+                description: "Another tool".into(),
+                parameters: serde_json::json!({ "type": "object" }),
+            }
+        }
+
+        async fn execute(&self, _args: serde_json::Value) -> seat_agent_core::Result<String> {
+            Ok("another".into())
+        }
+    }
+
+    #[test]
+    fn test_registry_new_is_empty() {
+        let registry = ToolRegistry::new();
+        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 0);
+    }
+
+    #[test]
+    fn test_default_is_empty() {
+        let registry = ToolRegistry::default();
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn test_register_and_get_tool() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DummyTool));
+        assert!(!registry.is_empty());
+        assert_eq!(registry.len(), 1);
+
+        let tool = registry.get_tool("dummy");
+        assert!(tool.is_some());
+        assert_eq!(tool.unwrap().definition().name, "dummy");
+    }
+
+    #[test]
+    fn test_get_nonexistent_returns_none() {
+        let registry = ToolRegistry::new();
+        assert!(registry.get_tool("nope").is_none());
+    }
+
+    #[test]
+    fn test_register_multiple_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DummyTool));
+        registry.register(Box::new(AnotherTool));
+        assert_eq!(registry.len(), 2);
+
+        assert!(registry.get_tool("dummy").is_some());
+        assert!(registry.get_tool("another").is_some());
+    }
+
+    #[test]
+    fn test_register_duplicate_overwrites() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DummyTool));
+        assert_eq!(registry.len(), 1);
+
+        // Register another tool with the same name "dummy"
+        struct DummyToolV2;
+        #[async_trait::async_trait]
+        impl seat_agent_core::Tool for DummyToolV2 {
+            fn definition(&self) -> ToolDefinition {
+                ToolDefinition {
+                    name: "dummy".into(),
+                    description: "V2".into(),
+                    parameters: serde_json::json!({ "type": "object" }),
+                }
+            }
+            async fn execute(&self, _: serde_json::Value) -> seat_agent_core::Result<String> {
+                Ok("v2".into())
+            }
+        }
+        registry.register(Box::new(DummyToolV2));
+        assert_eq!(registry.len(), 1);
+        // The second registration should overwrite
+        let tool = registry.get_tool("dummy").unwrap();
+        assert_eq!(tool.definition().description, "V2");
+    }
+
+    #[test]
+    fn test_tool_definitions() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DummyTool));
+        registry.register(Box::new(AnotherTool));
+
+        let defs = registry.tool_definitions();
+        assert_eq!(defs.len(), 2);
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"dummy"));
+        assert!(names.contains(&"another"));
+    }
+
+    #[test]
+    fn test_from_json_loads_config() {
+        let json = r#"{
+            "tools": [
+                {
+                    "name": "test_tool",
+                    "display_name": "Test",
+                    "description": "A test tool",
+                    "category": "info_query",
+                    "enabled": true,
+                    "parameters": { "type": "object" }
+                }
+            ]
+        }"#;
+
+        let registry = ToolRegistry::from_json(json).unwrap();
+        assert_eq!(registry.list_configs().len(), 1);
+        assert_eq!(registry.list_configs()[0].name, "test_tool");
+    }
+
+    #[test]
+    fn test_from_json_invalid_returns_error() {
+        let result = ToolRegistry::from_json("not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_example_tool_config_valid_json() {
+        let json = example_tool_config();
+        let result: Result<ToolConfigFile, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "example_tool_config() should be valid JSON");
+        let config = result.unwrap();
+        assert!(config.tools.len() >= 4, "Expected at least 4 tools");
+    }
+
+    #[test]
+    fn test_add_config_and_list() {
+        let mut registry = ToolRegistry::new();
+        let config = ToolConfig {
+            name: "my_tool".into(),
+            display_name: "My Tool".into(),
+            description: "desc".into(),
+            category: "info_query".into(),
+            enabled: true,
+            sensitive: false,
+            parameters: serde_json::json!({ "type": "object" }),
+            intermediate_reply: None,
+            error_reply: None,
+        };
+        registry.add_config(config);
+        assert_eq!(registry.list_configs().len(), 1);
+        assert_eq!(registry.list_configs()[0].name, "my_tool");
+    }
+
+    #[test]
+    fn test_enabled_configs() {
+        let mut registry = ToolRegistry::new();
+        registry.add_config(ToolConfig {
+            name: "on".into(),
+            display_name: "On".into(),
+            description: "".into(),
+            category: "".into(),
+            enabled: true,
+            sensitive: false,
+            parameters: serde_json::json!({ "type": "object" }),
+            intermediate_reply: None,
+            error_reply: None,
+        });
+        registry.add_config(ToolConfig {
+            name: "off".into(),
+            display_name: "Off".into(),
+            description: "".into(),
+            category: "".into(),
+            enabled: false,
+            sensitive: false,
+            parameters: serde_json::json!({ "type": "object" }),
+            intermediate_reply: None,
+            error_reply: None,
+        });
+
+        let enabled = registry.enabled_configs();
+        assert_eq!(enabled.len(), 1);
+        assert_eq!(enabled[0].name, "on");
+    }
+}

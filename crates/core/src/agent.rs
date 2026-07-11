@@ -234,3 +234,7 @@ impl Agent {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "agent_tests.rs"]
+mod agent_tests;
