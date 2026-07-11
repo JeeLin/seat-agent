@@ -11,8 +11,8 @@ pub use config::{AgentConfig, Modality};
 pub use context::{AgentEvent, AgentInput, Context, Message};
 pub use error::{AgentError, Result};
 pub use traits::{
-    BusinessBackend, EmbeddingClient, IntermediateReply, KnowledgeResult, KnowledgeStore,
-    LlmClient, LlmMessage, LlmRequest, LlmStreamChunk, MemoryStore, MessageRole, SearchResult,
-    Tool, ToolCall, ToolDefinition, TtsClient, VectorStore,
+    BusinessBackend, EmbeddingClient, FinishReason, IntermediateReply, KnowledgeResult,
+    KnowledgeStore, LlmClient, LlmMessage, LlmRequest, LlmStreamChunk, MemoryStore,
+    MessageRole, SearchResult, Tool, ToolCall, ToolDefinition, TtsClient, VectorStore,
 };
 pub use vector_store::InMemoryVectorStore;
