@@ -5,6 +5,12 @@ mod redis_store;
 use anyhow::Result;
 use config::AppConfig;
 use redis_store::RedisSessionStore;
+use seat_agent_core::vector_store::InMemoryVectorStore;
+use seat_agent_core::VectorStore;
+use seat_agent_tools::embedding::OpenAiEmbeddingClient;
+use seat_agent_tools::knowledge::KnowledgeSearchTool;
+use seat_agent_tools::registry::ToolRegistry;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -22,46 +28,42 @@ async fn main() -> Result<()> {
     tracing::info!("Redis 连接成功");
 
     // 构建 Embedding 客户端（OpenAI 兼容接口）
-    let embedding_client =
-        std::sync::Arc::new(seat_agent_tools::embedding::OpenAiEmbeddingClient::new(
-            config.embedding.api_key.clone(),
-            Some(config.embedding.base_url.clone()),
-            Some(config.embedding.model.clone()),
-        ));
+    let embedding_client = Arc::new(OpenAiEmbeddingClient::new(
+        config.embedding.api_key.clone(),
+        Some(config.embedding.base_url.clone()),
+        Some(config.embedding.model.clone()),
+    ));
     tracing::info!(
         "Embedding 客户端就绪: model={} dim={}",
         config.embedding.model,
         config.embedding.dim
     );
 
-    // 构建向量存储：默认内存实现，可切换为 Qdrant（需 tools 启用 qdrant feature）
-    let vector_store: std::sync::Arc<dyn seat_agent_core::VectorStore> =
-        if config.knowledge.vector_store == "qdrant" {
-            #[cfg(feature = "qdrant")]
-            {
-                std::sync::Arc::new(seat_agent_tools::qdrant_store::QdrantVectorStore::new(
-                    &config.knowledge.qdrant_url,
-                    config.knowledge.qdrant_collection.clone(),
-                )?)
-            }
-            #[cfg(not(feature = "qdrant"))]
-            {
-                tracing::warn!(
-                    "vector_store=qdrant 需要以 --features qdrant 构建，回退到内存向量存储"
-                );
-                std::sync::Arc::new(seat_agent_core::vector_store::InMemoryVectorStore::new())
-            }
-        } else {
-            std::sync::Arc::new(seat_agent_core::vector_store::InMemoryVectorStore::new())
-        };
+    // 构建向量存储：默认内存实现，可切换为 Qdrant（需以 --features qdrant 构建）
+    let vector_store: Arc<dyn VectorStore> = if config.knowledge.vector_store == "qdrant" {
+        #[cfg(feature = "qdrant")]
+        {
+            Arc::new(seat_agent_tools::qdrant_store::QdrantVectorStore::new(
+                &config.knowledge.qdrant_url,
+                config.knowledge.qdrant_collection.clone(),
+            )?)
+        }
+        #[cfg(not(feature = "qdrant"))]
+        {
+            tracing::warn!("vector_store=qdrant 需要以 --features qdrant 构建，回退到内存向量存储");
+            Arc::new(InMemoryVectorStore::new())
+        }
+    } else {
+        Arc::new(InMemoryVectorStore::new())
+    };
 
     // 构建并注册知识库检索工具（RAG 信息基础）
-    let knowledge_tool = seat_agent_tools::knowledge::KnowledgeSearchTool::new(
+    let knowledge_tool = KnowledgeSearchTool::new(
         vector_store.clone(),
         embedding_client.clone(),
         config.knowledge.top_k,
     );
-    let mut registry = seat_agent_tools::registry::ToolRegistry::new();
+    let mut registry = ToolRegistry::new();
     registry.register(Box::new(knowledge_tool));
     tracing::info!(
         "已注册工具: {}",
