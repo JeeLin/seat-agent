@@ -4,6 +4,7 @@ pub mod context;
 pub mod error;
 pub mod mock;
 pub mod traits;
+pub mod vector_store;
 pub use agent::Agent;
 pub use config::{AgentConfig, Modality};
 pub use context::{AgentEvent, AgentInput, Context, Message};
