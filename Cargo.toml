@@ -28,8 +28,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # 错误处理
+# YAML
+serde_yaml = "0.9"
 thiserror = "1"
 anyhow = "1"
+
 # HTTP 客户端
 reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
@@ -39,6 +42,16 @@ async-trait = "0.1"
 # 流
 futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
+
+# gRPC
+tonic = "0.8"
+prost = "0.11"
+# 日志订阅者
+tracing-subscriber = "0.3"
+tonic-build = "0.8"
+
+# Redis
+redis = { version = "0.23", features = ["tokio-comp", "connection-manager"] }
 
 # 日志
 tracing = "0.1"

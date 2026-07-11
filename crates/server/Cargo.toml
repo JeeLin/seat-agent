@@ -16,9 +16,17 @@ seat-agent-memory.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 anyhow.workspace = true
 reqwest.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true
 async-trait.workspace = true
+tonic.workspace = true
+prost.workspace = true
+redis.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true

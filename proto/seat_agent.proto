@@ -1,0 +1,56 @@
+syntax = "proto3";
+package seat_agent;
+
+service AgentService {
+  rpc Chat(stream ChatRequest) returns (stream ChatResponse);
+}
+
+message ChatRequest {
+  string session_id = 1;
+  oneof message {
+    TextMessage text = 2;
+  }
+}
+
+message TextMessage {
+  string content = 1;
+}
+
+message ChatResponse {
+  string session_id = 1;
+  oneof event {
+    TokenEvent token = 2;
+    ToolCallStartEvent tool_call_start = 3;
+    ToolCallEndEvent tool_call_end = 4;
+    TransferEvent transfer = 5;
+    ErrorEvent error = 6;
+    StreamStartEvent stream_start = 7;
+    StreamEndEvent stream_end = 8;
+  }
+}
+
+message TokenEvent {
+  string content = 1;
+}
+
+message ToolCallStartEvent {
+  string tool_name = 1;
+  string arguments = 2;
+}
+
+message ToolCallEndEvent {
+  string tool_name = 1;
+  string result = 2;
+}
+
+message TransferEvent {
+  string reason = 1;
+}
+
+message ErrorEvent {
+  string message = 1;
+}
+
+message StreamStartEvent {}
+
+message StreamEndEvent {}

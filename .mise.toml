@@ -1,11 +1,12 @@
 [tools]
 rust = "stable"
+protobuf = "latest"
 
 # ─── Tasks ────────────────────────────────────────────────────────────────────
 
 [tasks.install]
-description = "Install Rust toolchain"
-run = "rustup show active-toolchain"
+description = "Install Rust toolchain and dependencies"
+run = "rustup show active-toolchain && protoc --version"
 
 [tasks.build]
 description = "Build all crates"

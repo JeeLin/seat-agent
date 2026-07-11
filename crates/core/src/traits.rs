@@ -211,3 +211,42 @@ pub trait Tool: Send + Sync {
     /// 执行工具
     async fn execute(&self, args: serde_json::Value) -> Result<String>;
 }
+
+// ============================================================================
+// Session Store
+// ============================================================================
+
+/// 会话数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    /// 会话 ID
+    pub session_id: String,
+
+    /// 对话历史（序列化为 JSON）
+    pub history: Vec<LlmMessage>,
+
+    /// 历史摘要
+    pub history_summary: Option<String>,
+
+    /// 元数据
+    pub metadata: HashMap<String, serde_json::Value>,
+
+    /// 创建时间（Unix 时间戳，秒）
+    pub created_at: i64,
+
+    /// 最后更新时间（Unix 时间戳，秒）
+    pub updated_at: i64,
+}
+
+/// 会话存储 trait
+#[async_trait]
+pub trait SessionStore: Send + Sync {
+    /// 获取会话
+    async fn get(&self, session_id: &str) -> Result<Option<Session>>;
+
+    /// 保存会话
+    async fn set(&self, session_id: &str, session: &Session) -> Result<()>;
+
+    /// 删除会话
+    async fn delete(&self, session_id: &str) -> Result<()>;
+}
