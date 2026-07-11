@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use seat_agent_core::{
-    EmbeddingClient, Tool, ToolDefinition, VectorStore,
-};
+use seat_agent_core::{EmbeddingClient, Tool, ToolDefinition, VectorStore};
 use serde_json::{json, Value};
 
 #[cfg(test)]
@@ -52,12 +50,9 @@ impl Tool for KnowledgeSearchTool {
     }
 
     async fn execute(&self, args: Value) -> seat_agent_core::Result<String> {
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                seat_agent_core::AgentError::Tool("knowledge_search: missing 'query'".into())
-            })?;
+        let query = args.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
+            seat_agent_core::AgentError::Tool("knowledge_search: missing 'query'".into())
+        })?;
 
         let embeddings = self.embedding_client.embed(&[query]).await?;
         let embedding = embeddings
@@ -79,10 +74,7 @@ impl Tool for KnowledgeSearchTool {
                 .get("content")
                 .and_then(|v| v.as_str())
                 .unwrap_or("<无正文>");
-            out.push_str(&format!(
-                "[{i}] (score={:.3}) {}\n",
-                r.score, content
-            ));
+            out.push_str(&format!("[{i}] (score={:.3}) {}\n", r.score, content));
         }
         Ok(out)
     }
@@ -106,7 +98,10 @@ mod tests {
         for (i, text) in texts.iter().enumerate() {
             let emb = sample_embedding_client().embed(&[text]).await.unwrap();
             let mut meta = HashMap::new();
-            meta.insert("content".to_string(), json!(format!("知识{i}: {text}详情...")));
+            meta.insert(
+                "content".to_string(),
+                json!(format!("知识{i}: {text}详情...")),
+            );
             store.upsert(&format!("k{i}"), &emb[0], meta).await.unwrap();
             let _ = dim;
         }
@@ -117,10 +112,7 @@ mod tests {
     async fn returns_relevant_content() {
         let store = seeded_store().await;
         let tool = KnowledgeSearchTool::new(store, sample_embedding_client(), 3);
-        let result = tool
-            .execute(json!({ "query": "退款" }))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({ "query": "退款" })).await.unwrap();
         assert!(result.contains("退款"), "结果应包含退款相关内容: {result}");
     }
 

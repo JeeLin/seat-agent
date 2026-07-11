@@ -82,7 +82,11 @@ impl VectorStore for InMemoryVectorStore {
             .collect();
 
         // 分数降序，取前 limit 个
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scored.truncate(limit);
         Ok(scored)
     }
@@ -143,7 +147,10 @@ mod tests {
         for (i, x) in [0.2f32, 0.5, 0.8].into_iter().enumerate() {
             let mut meta = HashMap::new();
             meta.insert("content".to_string(), json!(format!("doc-{i}")));
-            store.upsert(&format!("d{i}"), &embed(x), meta).await.unwrap();
+            store
+                .upsert(&format!("d{i}"), &embed(x), meta)
+                .await
+                .unwrap();
         }
         let results = store.search(&embed(0.5), 2).await.unwrap();
         assert_eq!(results.len(), 2);

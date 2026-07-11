@@ -63,7 +63,9 @@ impl EmbeddingClient for OpenAiEmbeddingClient {
             })
             .send()
             .await
-            .map_err(|e| seat_agent_core::AgentError::Internal(format!("embedding request failed: {e}")))?;
+            .map_err(|e| {
+                seat_agent_core::AgentError::Internal(format!("embedding request failed: {e}"))
+            })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -73,10 +75,9 @@ impl EmbeddingClient for OpenAiEmbeddingClient {
             )));
         }
 
-        let parsed: OpenAiEmbeddingResponse = resp
-            .json()
-            .await
-            .map_err(|e| seat_agent_core::AgentError::Internal(format!("embedding parse failed: {e}")))?;
+        let parsed: OpenAiEmbeddingResponse = resp.json().await.map_err(|e| {
+            seat_agent_core::AgentError::Internal(format!("embedding parse failed: {e}"))
+        })?;
 
         Ok(parsed.data.into_iter().map(|d| d.embedding).collect())
     }
