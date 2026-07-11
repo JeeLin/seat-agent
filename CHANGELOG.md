@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-11
+
+### Added
+- 业务后端抽象：`BusinessBackend` trait 定义在 core crate（零外部依赖），提供 `MockBusinessBackend` 用于测试与示例
+- 订单查询工具 `OrderQueryTool`：根据订单号查询并格式化订单信息（状态、金额、下单时间）
+- 退款查询工具 `RefundQueryTool`：根据退款单号查询并格式化退款信息（状态、金额、原因、进度）
+- 投诉查询工具 `ComplaintQueryTool`：根据投诉单号查询并格式化投诉处理进度（状态、渠道、进度、责任人）
+- 转人工工具 `TransferToHumanTool`：格式化转人工原因与回复话术，标记转人工出口（`<<TRANSFER>>`）
+- server 启动流程接入全部业务工具与转人工工具，与知识库工具共存
+
+### Changed
+- 业务查询工具提取 `get_field` / `get_field_or` / `require_arg` 辅助函数，消除重复代码（business.rs -13%）
+
 ## [0.4.0] - 2026-07-10
 
 ### Added
