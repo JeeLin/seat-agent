@@ -211,6 +211,10 @@ pub trait Tool: Send + Sync {
     /// 执行工具
     async fn execute(&self, args: serde_json::Value) -> Result<String>;
 }
+// ============================================================================
+// Business Backend
+// ============================================================================
+
 #[async_trait]
 pub trait BusinessBackend: Send + Sync {
     /// 查询订单信息

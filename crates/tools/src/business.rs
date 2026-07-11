@@ -7,6 +7,23 @@ use serde_json::{json, Value};
 /// 业务查询工具共用后端类型
 type Backend = Arc<dyn BusinessBackend>;
 
+/// 从 JSON Value 中提取字符串字段，不存在或非字符串时返回 `"未知"`
+fn get_field<'a>(data: &'a Value, key: &str) -> &'a str {
+    data.get(key).and_then(|v| v.as_str()).unwrap_or("未知")
+}
+
+/// 从 JSON Value 中提取字符串字段，不存在时返回 `fallback`
+fn get_field_or<'a>(data: &'a Value, key: &str, fallback: &'a str) -> &'a str {
+    data.get(key).and_then(|v| v.as_str()).unwrap_or(fallback)
+}
+
+/// 从工具参数中提取必填字符串参数，缺失时返回错误
+fn require_arg<'a>(args: &'a Value, key: &str, tool: &str) -> seat_agent_core::Result<&'a str> {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| seat_agent_core::AgentError::Tool(format!("{tool}: missing '{key}'")))
+}
+
 /// 订单查询工具：根据订单号查询并格式化订单信息
 pub struct OrderQueryTool {
     backend: Backend,
@@ -38,34 +55,15 @@ impl Tool for OrderQueryTool {
     }
 
     async fn execute(&self, args: Value) -> seat_agent_core::Result<String> {
-        let order_id = args
-            .get("order_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                seat_agent_core::AgentError::Tool("order_query: missing 'order_id'".into())
-            })?;
-
+        let order_id = require_arg(&args, "order_id", "order_query")?;
         let data = self.backend.query_order(order_id).await?;
         if data.is_null() {
             return Ok(format!("未找到订单 {order_id}，请核对订单号或转人工核实。"));
         }
-
-        let order_id = data
-            .get("order_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or(order_id);
-        let status = data
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let amount = data
-            .get("amount")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let created_at = data
-            .get("created_at")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
+        let order_id = get_field_or(&data, "order_id", order_id);
+        let status = get_field(&data, "status");
+        let amount = get_field(&data, "amount");
+        let created_at = get_field(&data, "created_at");
         Ok(format!(
             "订单查询成功：\n订单号：{order_id}\n状态：{status}\n金额：{amount}\n下单时间：{created_at}"
         ))
@@ -103,40 +101,18 @@ impl Tool for RefundQueryTool {
     }
 
     async fn execute(&self, args: Value) -> seat_agent_core::Result<String> {
-        let refund_id = args
-            .get("refund_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                seat_agent_core::AgentError::Tool("refund_query: missing 'refund_id'".into())
-            })?;
-
+        let refund_id = require_arg(&args, "refund_id", "refund_query")?;
         let data = self.backend.query_refund(refund_id).await?;
         if data.is_null() {
             return Ok(format!(
                 "未找到退款单 {refund_id}，请核对退款单号或转人工核实。"
             ));
         }
-
-        let refund_id = data
-            .get("refund_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or(refund_id);
-        let status = data
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let amount = data
-            .get("amount")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let reason = data
-            .get("reason")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let progress = data
-            .get("progress")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
+        let refund_id = get_field_or(&data, "refund_id", refund_id);
+        let status = get_field(&data, "status");
+        let amount = get_field(&data, "amount");
+        let reason = get_field(&data, "reason");
+        let progress = get_field(&data, "progress");
         Ok(format!(
             "退款查询成功：\n退款单号：{refund_id}\n状态：{status}\n金额：{amount}\n原因：{reason}\n进度：{progress}"
         ))
@@ -174,37 +150,18 @@ impl Tool for ComplaintQueryTool {
     }
 
     async fn execute(&self, args: Value) -> seat_agent_core::Result<String> {
-        let complaint_id = args
-            .get("complaint_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                seat_agent_core::AgentError::Tool("complaint_query: missing 'complaint_id'".into())
-            })?;
-
+        let complaint_id = require_arg(&args, "complaint_id", "complaint_query")?;
         let data = self.backend.query_complaint(complaint_id).await?;
         if data.is_null() {
             return Ok(format!(
                 "未找到投诉单 {complaint_id}，请核对投诉单号或转人工核实。"
             ));
         }
-
-        let complaint_id = data
-            .get("complaint_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or(complaint_id);
-        let status = data
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let channel = data
-            .get("channel")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let progress = data
-            .get("progress")
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let owner = data.get("owner").and_then(|v| v.as_str()).unwrap_or("未知");
+        let complaint_id = get_field_or(&data, "complaint_id", complaint_id);
+        let status = get_field(&data, "status");
+        let channel = get_field(&data, "channel");
+        let progress = get_field(&data, "progress");
+        let owner = get_field(&data, "owner");
         Ok(format!(
             "投诉查询成功：\n投诉单号：{complaint_id}\n状态：{status}\n渠道：{channel}\n进度：{progress}\n责任人：{owner}"
         ))
