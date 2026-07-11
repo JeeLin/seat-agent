@@ -9,9 +9,9 @@ pub use agent::Agent;
 pub use config::{AgentConfig, Modality};
 pub use context::{AgentEvent, AgentInput, Context, Message};
 pub use error::{AgentError, Result};
-pub use mock::MockLlmClient;
 pub use traits::{
     EmbeddingClient, IntermediateReply, KnowledgeResult, KnowledgeStore, LlmClient, LlmMessage,
     LlmRequest, LlmStreamChunk, MemoryStore, MessageRole, SearchResult, Tool, ToolCall,
     ToolDefinition, TtsClient, VectorStore,
 };
+pub use vector_store::InMemoryVectorStore;
