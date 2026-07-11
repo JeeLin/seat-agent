@@ -2,34 +2,57 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/),
-and this project adheres to [Semantic Versioning](https://semver.org/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
+
+## [0.6.0] - 2026-07-11
+
+### Added
+- Core crate 单元测试：Agent、Context、Config、Error、Mock 共 41 个测试
+- Tools crate 测试：ToolRegistry 注册/查找/分组/激活共 11 个测试
+- 跨 crate 集成测试：Agent + Tools 端到端流程共 9 个测试
+- basic_chat 示例增强：集成 OrderQueryTool、RefundQueryTool、ComplaintQueryTool、TransferToHumanTool
+- voice_chat 示例：语音模式演示（max_rounds=2，转人工场景）
+- Core lib.rs 导出 FinishReason 类型
+
+### Changed
+- Version bumped from 0.5.0 to 0.6.0
 
 ## [0.5.0] - 2026-07-11
 
 ### Added
-- 业务后端抽象：`BusinessBackend` trait 定义在 core crate（零外部依赖），提供 `MockBusinessBackend` 用于测试与示例
-- 订单查询工具 `OrderQueryTool`：根据订单号查询并格式化订单信息（状态、金额、下单时间）
-- 退款查询工具 `RefundQueryTool`：根据退款单号查询并格式化退款信息（状态、金额、原因、进度）
-- 投诉查询工具 `ComplaintQueryTool`：根据投诉单号查询并格式化投诉处理进度（状态、渠道、进度、责任人）
-- 转人工工具 `TransferToHumanTool`：格式化转人工原因与回复话术，标记转人工出口（`<<TRANSFER>>`）
-- server 启动流程接入全部业务工具与转人工工具，与知识库工具共存
+- 业务工具：OrderQueryTool、RefundQueryTool、ComplaintQueryTool
+- 转人工工具：TransferToHumanTool
+- BusinessBackend trait 及 MockBusinessBackend
+- server crate 集成业务工具和转人工工具
 
-### Changed
-- 业务查询工具提取 `get_field` / `get_field_or` / `require_arg` 辅助函数，消除重复代码（business.rs -13%）
-
-## [0.4.0] - 2026-07-10
+## [0.4.0] - 2026-07-11
 
 ### Added
-- 知识库集成：实现内存版 `VectorStore`（`InMemoryVectorStore`，余弦相似度检索），放置于 core crate 以遵循零外部依赖约束
--  Embedding 客户端：`OpenAiEmbeddingClient`（OpenAI 兼容 `/embeddings` 接口，rustls-tls）与 `MockEmbeddingClient`（确定性伪向量，测试用）
-- 知识库检索工具 `KnowledgeSearchTool`：串联 embed → 向量检索 → 结果格式化，空结果明确提示不编造（RAG「准确性优先」信息基础）
-- 可选 Qdrant 向量库实现 `QdrantVectorStore`，通过 `qdrant` Cargo feature 启用，默认构建不引入 `qdrant-client` 依赖
-- server 启动流程接入知识库工具：新增 Embedding / Knowledge 配置段，按配置选择向量存储后端（内存默认，Qdrant 经 feature 切换）并在 `ToolRegistry` 注册 `KnowledgeSearchTool`
+- VectorStore trait 及 InMemoryVectorStore 实现
+- Qdrant VectorStore（feature flag `qdrant`）
+- KnowledgeSearchTool 知识库检索工具
 
-### Changed
-- core 重新导出 `MockLlmClient`，修复 `examples/basic_chat` 编译
+## [0.3.0] - 2026-07-11
 
-[0.4.0]: https://github.com/JeeLin/seat-agent/releases/tag/v0.4.0
+### Added
+- 独立 gRPC 服务（Bidi Streaming）
+- Redis 会话存储
+- 配置加载（YAML）
+- TTS client 接口
+
+## [0.2.0] - 2026-07-11
+
+### Added
+- OpenAI LLM 客户端（流式输出）
+- MockLlmClient 测试辅助
+- basic_chat 基础示例
+
+## [0.1.0] - 2026-07-11
+
+### Added
+- Core crate：Agent Loop、Context 分层模型、AgentConfig
+- Tools crate：ToolRegistry、JSON 配置加载
+- 核心 trait 定义（LlmClient、Tool、KnowledgeStore、MemoryStore、VectorStore）
+- 错误类型体系
