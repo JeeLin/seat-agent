@@ -198,7 +198,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "basic_chat"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -1828,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "seat-agent-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1843,7 +1843,7 @@ dependencies = [
 
 [[package]]
 name = "seat-agent-memory"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1857,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "seat-agent-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1881,7 +1881,7 @@ dependencies = [
 
 [[package]]
 name = "seat-agent-tools"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -2600,7 +2600,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "voice_chat"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "futures",
