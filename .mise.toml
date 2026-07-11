@@ -1,12 +1,16 @@
 [tools]
 rust = "stable"
-protobuf = "latest"
+protobuf = "35.1"
+
+[env]
+CARGO_TERM_COLOR = "always"
+RUST_BACKTRACE = "1"
 
 # ─── Tasks ────────────────────────────────────────────────────────────────────
 
 [tasks.install]
-description = "Install Rust toolchain and dependencies"
-run = "rustup show active-toolchain && protoc --version"
+description = "Install all tools and verify environment"
+run = ["rustup show active-toolchain", "protoc --version"]
 
 [tasks.build]
 description = "Build all crates"
@@ -14,7 +18,11 @@ run = "cargo build --workspace"
 
 [tasks.check]
 description = "Run all checks (check + clippy + fmt)"
-run = "cargo check --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all -- --check"
+run = [
+    "cargo check --workspace",
+    "cargo clippy --workspace --all-targets -- -D warnings",
+    "cargo fmt --all -- --check"
+]
 
 [tasks.test]
 description = "Run all tests"
@@ -35,3 +43,23 @@ run = "cargo clean"
 [tasks.dev]
 description = "Run seat-agent-server"
 run = "cargo run -p seat-agent-server"
+
+[tasks.redis-start]
+description = "Start Redis server"
+run = "redis-server --daemonize yes --port 6379"
+
+[tasks.redis-stop]
+description = "Stop Redis server"
+run = "redis-cli shutdown"
+
+[tasks.redis-status]
+description = "Check Redis status"
+run = "redis-cli ping"
+
+[tasks.all]
+description = "Run full CI pipeline (fmt + clippy + test)"
+run = [
+    "cargo fmt",
+    "cargo clippy --workspace --all-targets -- -D warnings",
+    "cargo test --workspace"
+]
