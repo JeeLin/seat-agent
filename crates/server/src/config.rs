@@ -79,6 +79,92 @@ fn default_session_ttl() -> u64 {
     3600
 }
 
+/// Embedding 配置
+#[derive(Debug, Deserialize)]
+pub struct EmbeddingConfig {
+    /// API 基础 URL
+    #[serde(default = "default_embedding_base_url")]
+    pub base_url: String,
+
+    /// API 密钥
+    #[serde(default)]
+    pub api_key: String,
+
+    /// 模型名称
+    #[serde(default = "default_embedding_model")]
+    pub model: String,
+
+    /// 向量维度
+    #[serde(default = "default_embedding_dim")]
+    pub dim: usize,
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            base_url: default_embedding_base_url(),
+            api_key: String::new(),
+            model: default_embedding_model(),
+            dim: default_embedding_dim(),
+        }
+    }
+}
+
+fn default_embedding_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+
+fn default_embedding_model() -> String {
+    "text-embedding-3-small".to_string()
+}
+
+fn default_embedding_dim() -> usize {
+    1536
+}
+
+/// 知识库检索配置
+#[derive(Debug, Deserialize)]
+pub struct KnowledgeConfig {
+    /// 召回数量
+    #[serde(default = "default_top_k")]
+    pub top_k: usize,
+
+    /// 向量存储后端: "memory" 或 "qdrant"
+    #[serde(default = "default_vector_store")]
+    pub vector_store: String,
+
+    /// Qdrant 服务 URL（仅 vector_store = "qdrant" 时使用）
+    #[serde(default)]
+    pub qdrant_url: String,
+
+    /// Qdrant 集合名
+    #[serde(default = "default_qdrant_collection")]
+    pub qdrant_collection: String,
+}
+
+impl Default for KnowledgeConfig {
+    fn default() -> Self {
+        Self {
+            top_k: default_top_k(),
+            vector_store: default_vector_store(),
+            qdrant_url: String::new(),
+            qdrant_collection: default_qdrant_collection(),
+        }
+    }
+}
+
+fn default_top_k() -> usize {
+    3
+}
+
+fn default_vector_store() -> String {
+    "memory".to_string()
+}
+
+fn default_qdrant_collection() -> String {
+    "seat_agent_knowledge".to_string()
+}
+
 /// 应用配置
 #[derive(Debug, Deserialize)]
 pub struct AppConfig {
@@ -88,6 +174,14 @@ pub struct AppConfig {
 
     /// LLM 配置
     pub llm: LlmConfig,
+
+    /// Embedding 配置
+    #[serde(default)]
+    pub embedding: EmbeddingConfig,
+
+    /// 知识库检索配置
+    #[serde(default)]
+    pub knowledge: KnowledgeConfig,
 
     /// Redis 配置
     #[serde(default)]
@@ -103,6 +197,8 @@ impl Default for AppConfig {
         Self {
             server: ServerConfig::default(),
             llm: LlmConfig::default(),
+            embedding: EmbeddingConfig::default(),
+            knowledge: KnowledgeConfig::default(),
             redis: RedisConfig::default(),
             agent: AgentConfig::default(),
         }
@@ -134,6 +230,12 @@ impl AppConfig {
         }
         if let Ok(model) = std::env::var("SEAT_AGENT_LLM_MODEL") {
             self.llm.model = model;
+        }
+        if let Ok(url) = std::env::var("SEAT_AGENT_EMBEDDING_URL") {
+            self.embedding.base_url = url;
+        }
+        if let Ok(key) = std::env::var("SEAT_AGENT_EMBEDDING_API_KEY") {
+            self.embedding.api_key = key;
         }
         if let Ok(redis_url) = std::env::var("SEAT_AGENT_REDIS_URL") {
             self.redis.url = redis_url;

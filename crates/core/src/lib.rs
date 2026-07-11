@@ -3,6 +3,7 @@ pub mod config;
 pub mod context;
 pub mod error;
 pub mod mock;
+pub use mock::MockLlmClient;
 pub mod traits;
 pub mod vector_store;
 pub use agent::Agent;
