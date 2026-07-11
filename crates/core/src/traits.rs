@@ -211,6 +211,17 @@ pub trait Tool: Send + Sync {
     /// 执行工具
     async fn execute(&self, args: serde_json::Value) -> Result<String>;
 }
+#[async_trait]
+pub trait BusinessBackend: Send + Sync {
+    /// 查询订单信息
+    async fn query_order(&self, order_id: &str) -> Result<serde_json::Value>;
+
+    /// 查询退款信息
+    async fn query_refund(&self, refund_id: &str) -> Result<serde_json::Value>;
+
+    /// 查询投诉处理进度
+    async fn query_complaint(&self, complaint_id: &str) -> Result<serde_json::Value>;
+}
 
 // ============================================================================
 // Session Store

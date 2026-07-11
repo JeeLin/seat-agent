@@ -1,3 +1,4 @@
+pub mod business;
 pub mod embedding;
 pub mod knowledge;
 pub mod registry;

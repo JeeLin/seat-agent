@@ -170,6 +170,28 @@ pub fn example_tool_config() -> &'static str {
       "error_reply": "抱歉，知识库查询暂时不可用"
     },
     {
+      "name": "order_query",
+      "display_name": "订单查询",
+      "description": "查询订单信息（状态、金额、下单时间等）",
+      "category": "info_query",
+      "enabled": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "订单号"
+          }
+        },
+        "required": ["order_id"]
+      },
+      "intermediate_reply": {
+        "text": "正在查询订单...",
+        "audio_cue": "sounds/keyboard_typing.mp3"
+      },
+      "error_reply": "抱歉，订单查询暂时不可用"
+    },
+    {
       "name": "transfer_to_human",
       "display_name": "转人工客服",
       "description": "转接人工客服",
