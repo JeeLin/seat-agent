@@ -6,6 +6,7 @@ members = [
     "crates/memory",
     "crates/server",
     "examples/basic_chat",
+    "examples/voice_chat",
 ]
 
 [workspace.package]

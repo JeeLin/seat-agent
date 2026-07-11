@@ -1,5 +1,5 @@
 [package]
-name = "basic_chat"
+name = "voice_chat"
 version.workspace = true
 edition.workspace = true
 publish = false
