@@ -28,6 +28,10 @@ tonic.workspace = true
 prost.workspace = true
 redis.workspace = true
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+tempfile = "3"
+
 [build-dependencies]
 tonic-build.workspace = true
 
