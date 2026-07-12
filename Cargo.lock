@@ -1847,6 +1847,7 @@ version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures",
  "seat-agent-core",
  "serde",
  "serde_json",

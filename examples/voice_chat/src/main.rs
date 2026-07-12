@@ -96,6 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let input = AgentInput {
         session_id: "voice-demo".to_string(),
+        customer_id: "voice-customer".to_string(),
         message: Message {
             role: MessageRole::User,
             content: "我要投诉！".to_string(),

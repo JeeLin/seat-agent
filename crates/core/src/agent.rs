@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use crate::config::AgentConfig;
 use crate::context::{AgentEvent, AgentInput, Context};
 use crate::error::{AgentError, Result};
-use crate::traits::{KnowledgeStore, LlmClient, LlmRequest, LlmStreamChunk, MemoryStore, Tool};
+use crate::traits::{KnowledgeStore, LlmClient, LlmRequest, LlmStreamChunk, MemoryManager, Tool};
 
 /// Agent 主循环
 pub struct Agent {
@@ -14,7 +14,7 @@ pub struct Agent {
     llm: Arc<dyn LlmClient>,
     tools: Vec<Box<dyn Tool>>,
     knowledge: Option<Box<dyn KnowledgeStore>>,
-    memory: Option<Box<dyn MemoryStore>>,
+    memory: Option<Box<dyn MemoryManager>>,
 }
 
 impl Agent {
@@ -39,8 +39,8 @@ impl Agent {
         self.knowledge = Some(knowledge);
     }
 
-    /// 设置记忆存储
-    pub fn set_memory(&mut self, memory: Box<dyn MemoryStore>) {
+    /// 设置记忆管理器
+    pub fn set_memory(&mut self, memory: Box<dyn MemoryManager>) {
         self.memory = Some(memory);
     }
 
@@ -59,6 +59,16 @@ impl Agent {
         if let Some(knowledge) = &self.knowledge {
             let results = knowledge.search(&input.message.content, 3).await?;
             context.set_retrieval(results);
+        }
+
+        // 记忆：检索历史摘要（如果配置了 memory）
+        if let Some(memory) = &self.memory {
+            if let Ok(summaries) = memory.recall(&input.message.content, &input.customer_id).await
+            {
+                if !summaries.is_empty() {
+                    context.set_history_summary(Some(summaries.join("\n")));
+                }
+            }
         }
 
         // Agent Loop
@@ -229,6 +239,18 @@ impl Agent {
             // 将工作区内容移动到历史，供下一轮 LLM 查看
             context.flush_working_to_history();
             round += 1;
+        }
+
+        // 记忆：保存会话摘要（如果配置了 memory）
+        if let Some(memory) = &self.memory {
+            let messages = context.build_messages();
+            let _ = memory
+                .save_session_summary(
+                    &input.session_id,
+                    &input.customer_id,
+                    &messages,
+                )
+                .await;
         }
 
         Ok(())

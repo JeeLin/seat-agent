@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::Stream;
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;

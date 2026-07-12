@@ -104,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let input = AgentInput {
         session_id: "demo-session".to_string(),
+        customer_id: "demo-customer".to_string(),
         message: Message {
             role: MessageRole::User,
             content: "我想查一下我的订单 20240308001".to_string(),

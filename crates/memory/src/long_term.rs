@@ -14,12 +14,12 @@ use std::sync::Arc;
 use seat_agent_core::{EmbeddingClient, SearchResult, VectorStore};
 
 /// 长期记忆管理器
-pub struct LongTermMemory<V: VectorStore> {
+pub struct LongTermMemory<V: VectorStore + ?Sized> {
     store: Arc<V>,
     embedding: Arc<dyn EmbeddingClient>,
 }
 
-impl<V: VectorStore> LongTermMemory<V> {
+impl<V: VectorStore + ?Sized> LongTermMemory<V> {
     pub fn new(store: Arc<V>, embedding: Arc<dyn EmbeddingClient>) -> Self {
         Self { store, embedding }
     }

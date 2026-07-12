@@ -93,6 +93,7 @@ impl Tool for FailTool {
 fn make_user_input(content: &str) -> AgentInput {
     AgentInput {
         session_id: "test-session".to_string(),
+        customer_id: "test-customer".to_string(),
         message: Message {
             role: MessageRole::User,
             content: content.to_string(),

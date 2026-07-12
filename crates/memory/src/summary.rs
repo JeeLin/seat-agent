@@ -3,17 +3,20 @@
 //! 会话结束时生成/修正长期记忆摘要，不增加实时延迟。
 //! 若已有摘要（existing），则在其基础上修正为最新事实。
 
+use std::sync::Arc;
+
 use seat_agent_core::{LlmClient, LlmMessage, LlmRequest, LlmStreamChunk, MessageRole};
 
 /// 摘要生成器
-pub struct SummaryGenerator<L: LlmClient> {
-    llm: L,
+pub struct SummaryGenerator<L: LlmClient + ?Sized> {
+    llm: Arc<L>,
 }
 
-impl<L: LlmClient> SummaryGenerator<L> {
-    pub fn new(llm: L) -> Self {
+impl<L: LlmClient + ?Sized> SummaryGenerator<L> {
+    pub fn new(llm: Arc<L>) -> Self {
         Self { llm }
     }
+
 
     /// 根据当前会话历史生成或修正摘要
     ///
@@ -82,7 +85,7 @@ mod tests {
     #[tokio::test]
     async fn generate_new_summary() {
         let llm = MockLlmClient::new(vec!["客户咨询订单退款".to_string()]);
-        let gen = SummaryGenerator::new(llm);
+        let gen = SummaryGenerator::new(Arc::new(llm));
 
         let history = vec![LlmMessage {
             role: MessageRole::User,
@@ -98,7 +101,7 @@ mod tests {
     #[tokio::test]
     async fn generate_merged_summary() {
         let llm = MockLlmClient::new(vec!["客户已收到退款，问题已解决".to_string()]);
-        let gen = SummaryGenerator::new(llm);
+        let gen = SummaryGenerator::new(Arc::new(llm));
 
         let history = vec![LlmMessage {
             role: MessageRole::User,

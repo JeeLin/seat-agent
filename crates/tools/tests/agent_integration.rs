@@ -99,6 +99,7 @@ impl Tool for FailTool {
 fn user_input(text: &str) -> AgentInput {
     AgentInput {
         session_id: "itest".into(),
+        customer_id: "customer-1".into(),
         message: Message {
             role: MessageRole::User,
             content: text.into(),

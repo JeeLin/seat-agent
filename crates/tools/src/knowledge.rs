@@ -79,6 +79,41 @@ impl Tool for KnowledgeSearchTool {
         Ok(out)
     }
 }
+#[async_trait]
+impl seat_agent_core::KnowledgeStore for KnowledgeSearchTool {
+    async fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> seat_agent_core::Result<Vec<seat_agent_core::KnowledgeResult>> {
+        let embeddings = self.embedding_client.embed(&[query]).await?;
+        let embedding = embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| seat_agent_core::AgentError::Tool("embedding returned empty".into()))?;
+
+        let top_k = if limit > 0 { limit } else { self.top_k };
+        let results = self.vector_store.search(&embedding, top_k).await?;
+
+        Ok(results
+            .into_iter()
+            .map(|r| {
+                let content = r
+                    .metadata
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                seat_agent_core::KnowledgeResult {
+                    id: r.id,
+                    content,
+                    score: r.score,
+                    metadata: r.metadata,
+                }
+            })
+            .collect())
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -165,6 +165,35 @@ fn default_qdrant_collection() -> String {
     "seat_agent_knowledge".to_string()
 }
 
+/// Memory 配置
+#[derive(Debug, Deserialize)]
+pub struct MemoryConfig {
+    /// 短期记忆保留最大消息数（0 = 不限制）
+    #[serde(default = "default_short_term_max")]
+    pub short_term_max: usize,
+
+    /// 长期记忆检索 top_k
+    #[serde(default = "default_long_term_top_k")]
+    pub long_term_top_k: usize,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            short_term_max: 20,
+            long_term_top_k: 3,
+        }
+    }
+}
+
+fn default_short_term_max() -> usize {
+    20
+}
+
+fn default_long_term_top_k() -> usize {
+    3
+}
+
 /// 应用配置
 #[derive(Debug, Deserialize)]
 pub struct AppConfig {
@@ -190,6 +219,10 @@ pub struct AppConfig {
     /// Agent 配置
     #[serde(default)]
     pub agent: AgentConfig,
+
+    /// Memory 配置
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 impl Default for AppConfig {
@@ -201,6 +234,7 @@ impl Default for AppConfig {
             knowledge: KnowledgeConfig::default(),
             redis: RedisConfig::default(),
             agent: AgentConfig::default(),
+            memory: MemoryConfig::default(),
         }
     }
 }

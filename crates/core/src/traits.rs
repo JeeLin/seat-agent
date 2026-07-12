@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::Stream;
@@ -103,20 +102,26 @@ pub trait KnowledgeStore: Send + Sync {
 }
 
 // ============================================================================
-// Memory Store
+// Memory Manager
 // ============================================================================
 
-/// 记忆存储 trait
+/// 高层记忆管理 trait
+///
+/// 由 `Agent` 在消息处理流程中调用，提供跨会话的上下文记忆能力：
+/// - `recall`：会话开始时检索相关历史摘要，注入 Context
+/// - `save_session_summary`：会话结束时生成并保存摘要
 #[async_trait]
-pub trait MemoryStore: Send + Sync {
-    /// 保存记忆
-    async fn save(&self, key: &str, value: &str, ttl: Option<Duration>) -> Result<()>;
+pub trait MemoryManager: Send + Sync {
+    /// 检索相关历史摘要，按相关度降序排列
+    async fn recall(&self, query: &str, customer_id: &str) -> Result<Vec<String>>;
 
-    /// 加载记忆
-    async fn load(&self, key: &str) -> Result<Option<String>>;
-
-    /// 删除记忆
-    async fn delete(&self, key: &str) -> Result<()>;
+    /// 会话结束时生成并保存摘要
+    async fn save_session_summary(
+        &self,
+        session_id: &str,
+        customer_id: &str,
+        history: &[LlmMessage],
+    ) -> Result<()>;
 }
 
 // ============================================================================

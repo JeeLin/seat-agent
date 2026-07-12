@@ -55,6 +55,7 @@ impl AgentService for AgentGrpcServer {
                             let agent_input = match message {
                                 proto::chat_request::Message::Text(text) => AgentInput {
                                     session_id: req.session_id,
+                                    customer_id: req.customer_id,
                                     message: Message {
                                         role: MessageRole::User,
                                         content: text.content,

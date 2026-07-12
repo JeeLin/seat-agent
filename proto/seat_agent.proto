@@ -10,6 +10,7 @@ message ChatRequest {
   oneof message {
     TextMessage text = 2;
   }
+  string customer_id = 3;
 }
 
 message TextMessage {

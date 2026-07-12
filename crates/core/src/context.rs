@@ -16,6 +16,7 @@ pub struct Message {
 #[derive(Debug)]
 pub struct AgentInput {
     pub session_id: String,
+    pub customer_id: String,
     pub message: Message,
 }
 
