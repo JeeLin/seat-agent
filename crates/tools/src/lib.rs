@@ -7,6 +7,7 @@ pub mod embedding;
 pub mod knowledge;
 pub mod registry;
 pub mod transfer;
+pub mod llm;
 
 #[cfg(feature = "qdrant")]
 pub mod qdrant_store;

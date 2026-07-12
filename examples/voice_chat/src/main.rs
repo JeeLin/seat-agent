@@ -6,9 +6,13 @@ use seat_agent_core::{
     LlmStreamChunk, Message, MessageRole,
 };
 use seat_agent_tools::business::{ComplaintQueryTool, MockBusinessBackend, OrderQueryTool};
+use seat_agent_tools::llm::OpenAiLlmClient;
 use seat_agent_tools::transfer::TransferToHumanTool;
 
-/// Mock LLM that parses JSON responses and emits proper tool call stream events.
+// ============================================================================
+// Mock LLM（无 API key 时使用）
+// ============================================================================
+
 struct JsonToolCallMock {
     responses: Vec<String>,
     idx: std::sync::atomic::AtomicUsize,
@@ -35,9 +39,7 @@ impl LlmClient for JsonToolCallMock {
     > {
         let i = self.idx.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let resp = &self.responses[i % self.responses.len()];
-
         let parsed: Result<serde_json::Value, _> = serde_json::from_str(resp);
-
         let chunks: Vec<seat_agent_core::Result<LlmStreamChunk>> = match parsed {
             Ok(serde_json::Value::Object(obj)) if obj.contains_key("tool_calls") => {
                 let calls = obj["tool_calls"].as_array().cloned().unwrap_or_default();
@@ -67,26 +69,59 @@ impl LlmClient for JsonToolCallMock {
                 }),
             ],
         };
-
-        let stream = tokio_stream::iter(chunks);
-        Ok(Box::pin(stream))
+        Ok(Box::pin(tokio_stream::iter(chunks)))
     }
 }
+
+// ============================================================================
+// 桥接 Arc → Box
+// ============================================================================
+
+struct LlmBridge(Arc<dyn LlmClient>);
+
+#[async_trait]
+impl LlmClient for LlmBridge {
+    async fn chat_stream(
+        &self,
+        request: LlmRequest,
+    ) -> seat_agent_core::Result<
+        std::pin::Pin<
+            Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>,
+        >,
+    > {
+        self.0.chat_stream(request).await
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend: Arc<dyn BusinessBackend> = Arc::new(MockBusinessBackend::new());
 
-    // 语音模式场景：客户投诉 → LLM 调用 transfer_to_human → 快速转人工
-    let mock_llm = JsonToolCallMock::new(vec![
-        r#"{"tool_calls":[{"id":"vc1","function":{"name":"transfer_to_human","arguments":"{\"reason\":\"投诉处理\",\"reply\":\"正在为您转接专属客服\"}"}}]}"#.to_string(),
-        "已为您转接专属客服，请稍候。".to_string(),
-    ]);
+    let use_real_llm = std::env::var("LLM_API_KEY")
+        .or_else(|_| std::env::var("OPENAI_API_KEY"))
+        .is_ok();
 
-    // voice() 工厂方法：max_rounds=2, Modality::Voice
     let config = AgentConfig::voice();
     let max_rounds = config.max_rounds;
-    let mut agent = Agent::new(config, Box::new(mock_llm));
+
+    let mut agent = if use_real_llm {
+        let llm = OpenAiLlmClient::from_env()?;
+        println!("✅ 使用真实 LLM: {}（语音模式）", llm.model_name());
+        println!("   max_rounds={}，超过此限制将强制结束\n", max_rounds);
+        Agent::new(config, Box::new(LlmBridge(Arc::new(llm))))
+    } else {
+        println!("ℹ️  未检测到 LLM_API_KEY，使用 Mock 演示模式");
+        println!("   设置 LLM_API_KEY=your-key 即可接入真实 LLM\n");
+        let mock_llm = JsonToolCallMock::new(vec![
+            r#"{"tool_calls":[{"id":"vc1","function":{"name":"transfer_to_human","arguments":"{\"reason\":\"投诉处理\",\"reply\":\"正在为您转接专属客服\"}"}}]}"#.to_string(),
+            "已为您转接专属客服，请稍候。".to_string(),
+        ]);
+        Agent::new(config, Box::new(mock_llm))
+    };
 
     agent.register_tool(Box::new(OrderQueryTool::new(backend.clone())));
     agent.register_tool(Box::new(ComplaintQueryTool::new(backend.clone())));
@@ -105,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
 
-    println!("=== voice_chat 语音客服演示 ===\n");
+    println!("=== seat-agent 语音客服演示 ===\n");
     println!("客户：{}", input.message.content);
     println!("模式：语音（max_rounds={}，Modality::Voice）\n", max_rounds);
 
@@ -136,10 +171,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     handle.await??;
     println!("\n=== 语音演示完成 ===");
-    println!(
-        "注：语音模式 max_rounds={}，超过此限制将强制结束",
-        max_rounds
-    );
 
     Ok(())
 }

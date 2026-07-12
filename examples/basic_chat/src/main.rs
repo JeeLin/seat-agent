@@ -8,10 +8,13 @@ use seat_agent_core::{
 use seat_agent_tools::business::{
     ComplaintQueryTool, MockBusinessBackend, OrderQueryTool, RefundQueryTool,
 };
+use seat_agent_tools::llm::OpenAiLlmClient;
 use seat_agent_tools::transfer::TransferToHumanTool;
 
-/// Mock LLM client that parses JSON responses containing `tool_calls` and emits
-/// proper stream events so the Agent can execute real tools.
+// ============================================================================
+// Mock LLM（无 API key 时使用）
+// ============================================================================
+
 struct JsonToolCallMock {
     responses: Vec<String>,
     idx: std::sync::atomic::AtomicUsize,
@@ -38,10 +41,7 @@ impl LlmClient for JsonToolCallMock {
     > {
         let i = self.idx.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let resp = &self.responses[i % self.responses.len()];
-
-        // Try to parse as JSON with tool_calls
         let parsed: Result<serde_json::Value, _> = serde_json::from_str(resp);
-
         let chunks: Vec<seat_agent_core::Result<LlmStreamChunk>> = match parsed {
             Ok(serde_json::Value::Object(obj)) if obj.contains_key("tool_calls") => {
                 let calls = obj["tool_calls"].as_array().cloned().unwrap_or_default();
@@ -71,28 +71,60 @@ impl LlmClient for JsonToolCallMock {
                 }),
             ],
         };
-        let stream = tokio_stream::iter(chunks);
-        Ok(Box::pin(stream))
+        Ok(Box::pin(tokio_stream::iter(chunks)))
     }
 }
+
+// ============================================================================
+// 桥接 Arc<dyn LlmClient> → Box<dyn LlmClient>
+// ============================================================================
+
+struct LlmBridge(Arc<dyn LlmClient>);
+
+#[async_trait]
+impl LlmClient for LlmBridge {
+    async fn chat_stream(
+        &self,
+        request: LlmRequest,
+    ) -> seat_agent_core::Result<
+        std::pin::Pin<
+            Box<dyn futures::Stream<Item = seat_agent_core::Result<LlmStreamChunk>> + Send>,
+        >,
+    > {
+        self.0.chat_stream(request).await
+    }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend: Arc<dyn BusinessBackend> = Arc::new(MockBusinessBackend::new());
 
-    let mock_llm = JsonToolCallMock::new(vec![
-        // 客户问订单 → LLM 决定调用 order_query
-        r#"{"tool_calls":[{"id":"call_1","function":{"name":"order_query","arguments":"{\"order_id\":\"20240308001\"}"}}]}"#.to_string(),
-        // LLM 根据工具结果回复客户
-        "您的订单 20240308001 状态为「已发货」，金额 ¥299.00。请问还需要什么帮助？".to_string(),
-        // 客户追问退款 → LLM 调用 refund_query
-        r#"{"tool_calls":[{"id":"call_2","function":{"name":"refund_query","arguments":"{\"refund_id\":\"RF20240310001\"}"}}]}"#.to_string(),
-        // LLM 回复退款状态
-        "您的退款单 RF20240310001 状态为「处理中」，预计 3-5 个工作日到账。".to_string(),
-    ]);
+    // 检查是否有 LLM_API_KEY → 真实对话；否则用 Mock 演示
+    let use_real_llm = std::env::var("LLM_API_KEY")
+        .or_else(|_| std::env::var("OPENAI_API_KEY"))
+        .is_ok();
 
     let config = AgentConfig::default();
-    let mut agent = Agent::new(config, Box::new(mock_llm));
+    let mut agent = if use_real_llm {
+        let llm = OpenAiLlmClient::from_env()?;
+        println!("✅ 使用真实 LLM: {}", llm.model_name());
+        println!("   设置 LLM_BASE_URL 可切换服务（默认 OpenAI）\n");
+        Agent::new(config, Box::new(LlmBridge(Arc::new(llm))))
+    } else {
+        println!("ℹ️  未检测到 LLM_API_KEY，使用 Mock 演示模式");
+        println!("   设置 LLM_API_KEY=your-key 即可接入真实 LLM\n");
+        let mock_llm = JsonToolCallMock::new(vec![
+            r#"{"tool_calls":[{"id":"call_1","function":{"name":"order_query","arguments":"{\"order_id\":\"20240308001\"}"}}]}"#.to_string(),
+            "您的订单 20240308001 状态为「已发货」，金额 ¥299.00。请问还需要什么帮助？".to_string(),
+            r#"{"tool_calls":[{"id":"call_2","function":{"name":"refund_query","arguments":"{\"refund_id\":\"RF20240310001\"}"}}]}"#.to_string(),
+            "您的退款单 RF20240310001 状态为「处理中」，预计 3-5 个工作日到账。".to_string(),
+        ]);
+        Agent::new(config, Box::new(mock_llm))
+    };
 
     // 注册全部业务工具
     agent.register_tool(Box::new(OrderQueryTool::new(backend.clone())));
