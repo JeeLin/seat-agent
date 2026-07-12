@@ -1,3 +1,7 @@
+//! seat-agent-core: Agent Runtime 核心层
+//!
+//! 定义 Agent Loop、Context 分层模型、核心 Trait 接口。
+//! 零外部依赖——不依赖 server 或 infra crate。
 pub mod agent;
 pub mod config;
 pub mod context;

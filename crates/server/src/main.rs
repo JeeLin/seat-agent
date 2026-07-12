@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// 桥接 Arc<dyn LlmClient> 到 Box<dyn LlmClient>
+/// 桥接 `Arc<dyn LlmClient>` 到 `Box<dyn LlmClient>`
 ///
 /// `Agent::new` 接受 `Box<dyn LlmClient>`，但后续多个组件共享同一 LLM 客户端实例。
 /// 此结构体持有 Arc，在调用时自动 defer。

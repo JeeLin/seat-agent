@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use seat_agent_core::{EmbeddingClient, SearchResult, VectorStore};
+use seat_agent_core::{EmbeddingClient, VectorStore};
 
 /// 长期记忆管理器
 pub struct LongTermMemory<V: VectorStore + ?Sized> {
