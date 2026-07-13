@@ -35,7 +35,7 @@ thiserror = "1"
 anyhow = "1"
 
 # HTTP 客户端
-reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "default-tls", "multipart"] }
 
 # 异步 trait
 async-trait = "0.1"
@@ -53,6 +53,9 @@ tonic-build = "0.8"
 
 # Redis
 redis = { version = "0.23", features = ["tokio-comp", "connection-manager"] }
+# 音频采集与播放
+cpal = "0.15"
+rodio = "0.19"
 
 # 日志
 tracing = "0.1"

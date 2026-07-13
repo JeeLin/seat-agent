@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -76,7 +77,7 @@ impl LlmClient for JsonToolCallMock {
 }
 
 // ============================================================================
-// 桥接 Arc<dyn LlmClient> → Box<dyn LlmClient>
+// 桥接 Arc → Box
 // ============================================================================
 
 struct LlmBridge(Arc<dyn LlmClient>);
@@ -96,27 +97,29 @@ impl LlmClient for LlmBridge {
 }
 
 // ============================================================================
-// Main
+// Main — 交互式循环
 // ============================================================================
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend: Arc<dyn BusinessBackend> = Arc::new(MockBusinessBackend::new());
 
-    // 检查是否有 LLM_API_KEY → 真实对话；否则用 Mock 演示
     let use_real_llm = std::env::var("LLM_API_KEY")
         .or_else(|_| std::env::var("OPENAI_API_KEY"))
         .is_ok();
 
     let config = AgentConfig::default();
-    let mut agent = if use_real_llm {
+
+    let agent = if use_real_llm {
         let llm = OpenAiLlmClient::from_env()?;
-        println!("✅ 使用真实 LLM: {}", llm.model_name());
-        println!("   设置 LLM_BASE_URL 可切换服务（默认 OpenAI）\n");
+        println!("=== seat-agent 客服系统 ===");
+        println!("LLM: {} (真实对话模式)", llm.model_name());
+        println!("输入消息开始对话，输入 quit/exit 退出\n");
         Agent::new(config, Box::new(LlmBridge(Arc::new(llm))))
     } else {
-        println!("ℹ️  未检测到 LLM_API_KEY，使用 Mock 演示模式");
-        println!("   设置 LLM_API_KEY=your-key 即可接入真实 LLM\n");
+        println!("=== seat-agent 客服系统 ===");
+        println!("LLM: Mock 演示模式（设置 LLM_API_KEY 可接入真实 LLM）");
+        println!("输入消息开始对话，输入 quit/exit 退出\n");
         let mock_llm = JsonToolCallMock::new(vec![
             r#"{"tool_calls":[{"id":"call_1","function":{"name":"order_query","arguments":"{\"order_id\":\"20240308001\"}"}}]}"#.to_string(),
             "您的订单 20240308001 状态为「已发货」，金额 ¥299.00。请问还需要什么帮助？".to_string(),
@@ -126,57 +129,85 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Agent::new(config, Box::new(mock_llm))
     };
 
-    // 注册全部业务工具
+    let mut agent = agent;
     agent.register_tool(Box::new(OrderQueryTool::new(backend.clone())));
     agent.register_tool(Box::new(RefundQueryTool::new(backend.clone())));
     agent.register_tool(Box::new(ComplaintQueryTool::new(backend.clone())));
     agent.register_tool(Box::new(TransferToHumanTool::new()));
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel(200);
+    let agent = Arc::new(agent);
+    let session_id = "demo-session".to_string();
+    let customer_id = "demo-customer".to_string();
 
-    let input = AgentInput {
-        session_id: "demo-session".to_string(),
-        customer_id: "demo-customer".to_string(),
-        message: Message {
-            role: MessageRole::User,
-            content: "我想查一下我的订单 20240308001".to_string(),
-            tool_calls: None,
-            tool_call_id: None,
-        },
-    };
+    loop {
+        print!("你: ");
+        io::stdout().flush()?;
 
-    println!("=== seat-agent 客服接待演示 ===\n");
-    println!("客户：{}", input.message.content);
-    println!();
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        let text = line.trim().to_string();
 
-    let handle = tokio::spawn(async move { agent.on_message(input, tx).await });
+        if text.is_empty() {
+            continue;
+        }
+        if text == "quit" || text == "exit" {
+            println!("再见！");
+            break;
+        }
 
-    while let Some(event) = rx.recv().await {
-        match event {
-            AgentEvent::StreamStart => {}
-            AgentEvent::Token(token) => print!("{}", token),
-            AgentEvent::StreamEnd => println!(),
-            AgentEvent::ToolCallStart {
-                tool_name,
-                arguments,
-            } => {
-                println!("  [调用工具] {} ({})", tool_name, arguments);
-            }
-            AgentEvent::ToolCallEnd { tool_name, result } => {
-                println!("  [工具结果] {}: {}", tool_name, result);
-                println!();
-            }
-            AgentEvent::TransferToHuman { reason } => {
-                println!("\n  [转人工] {}", reason);
-            }
-            AgentEvent::Error(err) => {
-                println!("\n  [错误] {}", err);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(200);
+
+        let input = AgentInput {
+            session_id: session_id.clone(),
+            customer_id: customer_id.clone(),
+            message: Message {
+                role: MessageRole::User,
+                content: text,
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        };
+
+        print!("客服: ");
+        io::stdout().flush()?;
+
+        let agent_clone = agent.clone();
+        let handle = tokio::spawn(async move { agent_clone.on_message(input, tx).await });
+
+        // 实时读取流式事件
+        while let Some(event) = rx.recv().await {
+            match event {
+                AgentEvent::StreamStart => {}
+                AgentEvent::Token(token) => {
+                    print!("{}", token);
+                    io::stdout().flush()?;
+                }
+                AgentEvent::StreamEnd => println!(),
+                AgentEvent::ToolCallStart {
+                    tool_name,
+                    arguments,
+                } => {
+                    println!("\n  [调用工具] {} ({})", tool_name, arguments);
+                }
+                AgentEvent::ToolCallEnd { tool_name, result } => {
+                    println!("  [工具结果] {}: {}", tool_name, result);
+                    print!("客服: ");
+                    io::stdout().flush()?;
+                }
+                AgentEvent::TransferToHuman { reason } => {
+                    println!("\n  [转人工] {}", reason);
+                }
+                AgentEvent::Error(err) => {
+                    println!("\n  [错误] {}", err);
+                }
             }
         }
-    }
 
-    handle.await??;
-    println!("\n=== 演示完成 ===");
+        if let Err(e) = handle.await? {
+            println!("\n  [错误] {}", e);
+        }
+        println!();
+    }
 
     Ok(())
 }

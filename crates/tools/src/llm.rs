@@ -4,7 +4,6 @@
 //! 通过环境变量或构造参数配置。
 
 use std::pin::Pin;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
